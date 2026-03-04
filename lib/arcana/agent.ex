@@ -890,8 +890,8 @@ defmodule Arcana.Agent do
       updated_ctx = %{ctx | results: updated_results, rerank_scores: scores}
 
       stop_metadata = %{
-        chunks_before: length(all_chunks_before),
-        chunks_after: length(reranked_chunks)
+        original: length(all_chunks_before),
+        kept: length(reranked_chunks)
       }
 
       {updated_ctx, stop_metadata}

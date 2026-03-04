@@ -4,6 +4,23 @@ defmodule Arcana.Agent.RerankTest do
   alias Arcana.Agent
   alias Arcana.Agent.Context
 
+  # Parses a batched rerank prompt and assigns scores based on passage content.
+  # Returns a batched JSON response like {"1": 9, "2": 2, "3": 8}.
+  defp batch_rerank_response(prompt, score_rules) do
+    scores =
+      Regex.scan(~r/\[(\d+)\] (.+)/, prompt)
+      |> Map.new(fn [_, id, text] ->
+        score =
+          Enum.find_value(score_rules, 5, fn {keyword, score} ->
+            if String.contains?(text, keyword), do: score
+          end)
+
+        {id, score}
+      end)
+
+    {:ok, JSON.encode!(scores)}
+  end
+
   describe "rerank/2" do
     setup do
       {:ok, _doc} =
@@ -28,22 +45,18 @@ defmodule Arcana.Agent.RerankTest do
     end
 
     test "reranks and filters chunks by score threshold" do
+      score_rules = [
+        {"functional programming", 9},
+        {"weather", 2},
+        {"sunny", 2},
+        {"BEAM virtual machine", 8}
+      ]
+
       llm = fn prompt ->
-        cond do
-          prompt =~ "functional programming" ->
-            {:ok, ~s({"score": 9, "reasoning": "highly relevant"})}
-
-          prompt =~ "weather" ->
-            {:ok, ~s({"score": 2, "reasoning": "not relevant"})}
-
-          prompt =~ "BEAM virtual machine" ->
-            {:ok, ~s({"score": 8, "reasoning": "relevant context"})}
-
-          prompt =~ "Rate how relevant" ->
-            {:ok, ~s({"score": 5, "reasoning": "default"})}
-
-          true ->
-            {:ok, "response"}
+        if prompt =~ "Rate how relevant each passage" do
+          batch_rerank_response(prompt, score_rules)
+        else
+          {:ok, "response"}
         end
       end
 
@@ -59,27 +72,24 @@ defmodule Arcana.Agent.RerankTest do
         |> Agent.search()
         |> Agent.rerank(threshold: 7)
 
-      # Should filter out the weather chunk
       all_chunks = Enum.flat_map(ctx.results, & &1.chunks)
       refute Enum.any?(all_chunks, &(&1.text =~ "weather"))
       assert Enum.any?(all_chunks, &(&1.text =~ "functional"))
     end
 
     test "re-sorts chunks by score descending" do
-      # LLM gives higher score to BEAM chunk
+      score_rules = [
+        {"BEAM", 10},
+        {"functional", 8},
+        {"weather", 9},
+        {"sunny", 9}
+      ]
+
       llm = fn prompt ->
-        cond do
-          prompt =~ "BEAM" ->
-            {:ok, ~s({"score": 10, "reasoning": "best match"})}
-
-          prompt =~ "functional" ->
-            {:ok, ~s({"score": 8, "reasoning": "good match"})}
-
-          prompt =~ "Rate how relevant" ->
-            {:ok, ~s({"score": 9, "reasoning": "default high"})}
-
-          true ->
-            {:ok, "response"}
+        if prompt =~ "Rate how relevant each passage" do
+          batch_rerank_response(prompt, score_rules)
+        else
+          {:ok, "response"}
         end
       end
 
@@ -96,14 +106,17 @@ defmodule Arcana.Agent.RerankTest do
         |> Agent.rerank(threshold: 7)
 
       all_chunks = Enum.flat_map(ctx.results, & &1.chunks)
-      # First chunk should be the BEAM one (highest score)
       assert hd(all_chunks).text =~ "BEAM"
     end
 
     test "uses default LLM reranker when no reranker specified" do
       llm = fn prompt ->
-        if prompt =~ "Rate how relevant" do
-          {:ok, ~s({"score": 8, "reasoning": "relevant"})}
+        if prompt =~ "Rate how relevant each passage" do
+          scores =
+            Regex.scan(~r/\[(\d+)\]/, prompt)
+            |> Map.new(fn [_, id] -> {id, 8} end)
+
+          {:ok, JSON.encode!(scores)}
         else
           {:ok, "response"}
         end
@@ -121,7 +134,6 @@ defmodule Arcana.Agent.RerankTest do
         |> Agent.search()
         |> Agent.rerank()
 
-      # Should have reranked results
       refute Enum.empty?(ctx.results)
     end
 
@@ -131,7 +143,6 @@ defmodule Arcana.Agent.RerankTest do
 
         @impl Arcana.Agent.Reranker
         def rerank(_question, chunks, _opts) do
-          # Just reverse the chunks as a simple test
           {:ok, Enum.reverse(chunks)}
         end
       end
@@ -150,7 +161,6 @@ defmodule Arcana.Agent.RerankTest do
         |> Agent.search()
         |> Agent.rerank(reranker: TestReranker)
 
-      # Reranker was called (chunks are reversed)
       refute Enum.empty?(ctx.results)
     end
 
@@ -158,7 +168,6 @@ defmodule Arcana.Agent.RerankTest do
       llm = fn _prompt -> {:ok, "response"} end
 
       custom_reranker = fn _question, chunks, _opts ->
-        # Filter to only chunks containing "Elixir"
         filtered = Enum.filter(chunks, &(&1.text =~ "Elixir"))
         {:ok, filtered}
       end
@@ -223,8 +232,12 @@ defmodule Arcana.Agent.RerankTest do
       )
 
       llm = fn prompt ->
-        if prompt =~ "Rate how relevant" do
-          {:ok, ~s({"score": 8, "reasoning": "relevant"})}
+        if prompt =~ "Rate how relevant each passage" do
+          scores =
+            Regex.scan(~r/\[(\d+)\]/, prompt)
+            |> Map.new(fn [_, id] -> {id, 8} end)
+
+          {:ok, JSON.encode!(scores)}
         else
           {:ok, "response"}
         end
@@ -242,16 +255,20 @@ defmodule Arcana.Agent.RerankTest do
       |> Agent.rerank()
 
       assert_receive {:telemetry, [:arcana, :agent, :rerank, :stop], _, stop_meta}
-      assert is_integer(stop_meta.chunks_before)
-      assert is_integer(stop_meta.chunks_after)
+      assert is_integer(stop_meta.original)
+      assert is_integer(stop_meta.kept)
 
       :telemetry.detach(ref)
     end
 
     test "stores rerank scores in context" do
       llm = fn prompt ->
-        if prompt =~ "Rate how relevant" do
-          {:ok, ~s({"score": 9, "reasoning": "good"})}
+        if prompt =~ "Rate how relevant each passage" do
+          scores =
+            Regex.scan(~r/\[(\d+)\]/, prompt)
+            |> Map.new(fn [_, id] -> {id, 9} end)
+
+          {:ok, JSON.encode!(scores)}
         else
           {:ok, "response"}
         end
@@ -277,8 +294,12 @@ defmodule Arcana.Agent.RerankTest do
       default_llm = fn _prompt -> raise "default LLM should not be called" end
 
       custom_llm = fn prompt ->
-        if prompt =~ "Rate how relevant" do
-          {:ok, ~s({"score": 9, "reasoning": "custom llm scored"})}
+        if prompt =~ "Rate how relevant each passage" do
+          scores =
+            Regex.scan(~r/\[(\d+)\]/, prompt)
+            |> Map.new(fn [_, id] -> {id, 9} end)
+
+          {:ok, JSON.encode!(scores)}
         else
           {:ok, "response"}
         end
@@ -296,13 +317,11 @@ defmodule Arcana.Agent.RerankTest do
         |> Agent.search()
         |> Agent.rerank(llm: custom_llm)
 
-      # Rerank should succeed using custom LLM
       refute Enum.empty?(ctx.results)
       assert is_map(ctx.rerank_scores)
     end
 
     test "skips reranking when skip_retrieval is true" do
-      # LLM should not be called since we're skipping retrieval
       llm = fn _prompt -> raise "LLM should not be called" end
 
       ctx = %Context{
@@ -315,7 +334,6 @@ defmodule Arcana.Agent.RerankTest do
 
       ctx = Agent.rerank(ctx)
 
-      # Should pass through without error
       assert ctx.results == []
       assert is_nil(ctx.error)
     end
