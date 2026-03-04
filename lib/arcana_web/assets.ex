@@ -2176,50 +2176,36 @@ defmodule ArcanaWeb.Assets do
     margin-top: 1rem;
   }
 
-  /* Graph-Enhanced toggle */
-  .arcana-graph-toggle {
-    margin-bottom: 1rem;
-    padding: 0.75rem 1rem;
-    background: linear-gradient(to right, #f3e8ff, #faf5ff);
-    border: 1px solid #e9d5ff;
-    border-radius: 0.5rem;
-  }
-
-  .arcana-graph-toggle .arcana-checkbox-label {
+  /* Deep Search toggle (simple mode, below textarea) */
+  .arcana-deep-search-toggle {
     display: flex;
-    flex-direction: row;
     align-items: center;
     gap: 0.5rem;
-    padding: 0;
-    background: transparent;
-    border: none;
+    padding: 0.5rem 0.75rem;
+    margin-top: 0.5rem;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.375rem;
     cursor: pointer;
+    font-size: 0.8125rem;
   }
 
-  .arcana-graph-toggle .arcana-checkbox-label input[type="checkbox"] {
-    position: static;
-    opacity: 1;
-    width: auto;
-    height: auto;
+  .arcana-deep-search-toggle:hover {
+    background: #f3f4f6;
+  }
+
+  .arcana-deep-search-toggle input[type="checkbox"] {
     accent-color: #7c3aed;
   }
 
-  .arcana-graph-toggle .arcana-checkbox-label span {
+  .arcana-deep-search-toggle span {
     font-weight: 500;
-    color: #7c3aed;
+    color: #374151;
   }
 
-  .arcana-graph-toggle .arcana-checkbox-label small {
-    color: #9333ea;
+  .arcana-deep-search-toggle small {
+    color: #6b7280;
     font-size: 0.75rem;
-    margin-top: 0;
-    margin-left: 0.25rem;
-  }
-
-  .arcana-graph-toggle .arcana-checkbox-label:hover,
-  .arcana-graph-toggle .arcana-checkbox-label:has(input:checked) {
-    background: transparent;
-    border: none;
   }
 
   /* Graph Context section */

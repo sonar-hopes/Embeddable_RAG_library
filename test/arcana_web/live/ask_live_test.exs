@@ -99,30 +99,53 @@ defmodule ArcanaWeb.AskLiveTest do
       {:ok, collection: collection, entity: entity, empty_collection: empty_collection}
     end
 
-    test "shows Graph-Enhanced toggle when at least one collection has graph data", %{conn: conn} do
+    test "shows Graph-Assisted toggle after selecting a graph-enabled collection", %{
+      conn: conn,
+      collection: collection
+    } do
       {:ok, view, _html} = live(conn, "/arcana/ask")
 
-      assert has_element?(view, "input[name='graph_enhanced']")
-      assert has_element?(view, ".arcana-graph-toggle")
+      # Not visible before selecting a collection
+      refute has_element?(view, "input[name='graph_search']")
+
+      # Select the graph-enabled collection
+      view
+      |> form("#ask-form", %{"collections" => [collection.name]})
+      |> render_change()
+
+      assert has_element?(view, "input[name='graph_search']")
     end
 
-    test "toggle label shows Graph-Enhanced with hint text", %{conn: conn} do
-      {:ok, _view, html} = live(conn, "/arcana/ask")
-
-      assert html =~ "Graph-Enhanced"
-      assert html =~ "Uses entity/relationship context"
-    end
-
-    test "toggle is visible in both Simple and Agentic modes", %{conn: conn} do
+    test "toggle label shows Graph-Assisted with hint text", %{conn: conn, collection: collection} do
       {:ok, view, _html} = live(conn, "/arcana/ask")
 
-      # Simple mode (default)
-      assert has_element?(view, "input[name='graph_enhanced']")
+      view
+      |> form("#ask-form", %{"collections" => [collection.name]})
+      |> render_change()
 
-      # Switch to Agentic
-      view |> element("button", "Agentic") |> render_click()
+      html = render(view)
+      assert html =~ "Graph-Assisted"
+      assert html =~ "Find results through entity relationships"
+    end
 
-      assert has_element?(view, "input[name='graph_enhanced']")
+    test "toggle appears in both Agentic and Simple modes when graph collection selected", %{
+      conn: conn,
+      collection: collection
+    } do
+      {:ok, view, _html} = live(conn, "/arcana/ask")
+
+      # Select graph collection
+      view
+      |> form("#ask-form", %{"collections" => [collection.name]})
+      |> render_change()
+
+      # Agentic mode (default): search fork with radio
+      assert has_element?(view, ".arcana-pipeline-fork input[name='graph_search']")
+
+      # Switch to Simple: inline toggle below textarea
+      view |> element("button", "Simple") |> render_click()
+
+      assert has_element?(view, ".arcana-deep-search-toggle input[name='graph_search']")
     end
   end
 
@@ -136,8 +159,7 @@ defmodule ArcanaWeb.AskLiveTest do
 
       {:ok, view, _html} = live(conn, "/arcana/ask")
 
-      refute has_element?(view, "input[name='graph_enhanced']")
-      refute has_element?(view, ".arcana-graph-toggle")
+      refute has_element?(view, "input[name='graph_search']")
     end
   end
 

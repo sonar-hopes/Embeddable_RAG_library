@@ -67,7 +67,16 @@ defmodule Arcana.Ask do
     :telemetry.span([:arcana, :ask], start_metadata, fn ->
       search_opts =
         opts
-        |> Keyword.take([:repo, :limit, :source_id, :threshold, :mode, :collection, :collections])
+        |> Keyword.take([
+          :repo,
+          :limit,
+          :source_id,
+          :threshold,
+          :mode,
+          :collection,
+          :collections,
+          :graph
+        ])
         |> Keyword.put_new(:limit, 5)
 
       case Arcana.Search.search(question, search_opts) do

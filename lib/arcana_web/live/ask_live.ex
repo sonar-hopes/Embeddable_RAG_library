@@ -17,13 +17,15 @@ defmodule ArcanaWeb.AskLive do
      socket
      |> assign(repo: repo)
      |> assign(
-       ask_mode: :simple,
+       ask_mode: :agentic,
        ask_question: "",
        ask_running: false,
        ask_context: nil,
        ask_error: nil,
        stats: nil,
        collections: [],
+       graph_search: true,
+       selected_collections: [],
        graph_context_expanded: true,
        llm_select: false,
        pipeline_step: nil
@@ -62,8 +64,11 @@ defmodule ArcanaWeb.AskLive do
     end)
   end
 
-  defp any_graph_enabled?(collections) do
-    Enum.any?(collections, & &1[:graph_enabled])
+  defp selected_graph_enabled?(collections, selected) do
+    case selected do
+      [] -> false
+      names -> Enum.any?(collections, &(&1.name in names and &1[:graph_enabled]))
+    end
   end
 
   @impl true
@@ -99,6 +104,11 @@ defmodule ArcanaWeb.AskLive do
     {:noreply, assign(socket, ask_mode: mode, llm_select: llm_select)}
   end
 
+  def handle_event("form_changed", params, socket) do
+    selected = params["collections"] || []
+    {:noreply, assign(socket, selected_collections: selected)}
+  end
+
   def handle_event("toggle_graph_context", _params, socket) do
     {:noreply, assign(socket, graph_context_expanded: !socket.assigns.graph_context_expanded)}
   end
@@ -116,15 +126,28 @@ defmodule ArcanaWeb.AskLive do
     Arcana.TaskSupervisor.start_child(fn ->
       handler_id = "pipeline-progress-#{inspect(parent)}"
 
+      graph_enabled = params["graph_search"] == "true"
+
       steps = [:expand, :decompose, :select, :search, :self_correct, :rerank, :answer, :ground]
-      events = Enum.map(steps, &[:arcana, :agent, &1, :start])
+
+      events =
+        Enum.map(steps, &[:arcana, :agent, &1, :start]) ++
+          [[:arcana, :graph, :search, :start]]
 
       :telemetry.attach_many(
         handler_id,
         events,
-        fn [:arcana, :agent, step, :start], _measurements, _metadata, _config ->
-          label = pipeline_step_label(step)
-          if label, do: send(parent, {:pipeline_progress, label})
+        fn
+          [:arcana, :graph, :search, :start], _measurements, _metadata, _config ->
+            send(parent, {:pipeline_progress, "Searching with graph connections..."})
+
+          [:arcana, :agent, step, :start], _measurements, _metadata, _config ->
+            label =
+              if step == :search and graph_enabled,
+                do: "Searching with graph connections...",
+                else: pipeline_step_label(step)
+
+            if label, do: send(parent, {:pipeline_progress, label})
         end,
         nil
       )
@@ -145,8 +168,8 @@ defmodule ArcanaWeb.AskLive do
     end)
   end
 
-  defp run_ask("simple", question, repo, llm, _all_collections, _params, selected_collections) do
-    run_simple_ask(question, repo, llm, selected_collections)
+  defp run_ask("simple", question, repo, llm, _all_collections, params, selected_collections) do
+    run_simple_ask(question, repo, llm, selected_collections, params)
   end
 
   defp run_ask(_mode, question, repo, llm, all_collections, params, selected_collections) do
@@ -162,7 +185,8 @@ defmodule ArcanaWeb.AskLive do
       use_rerank: params["use_rerank"] == "true",
       use_ground: params["use_ground"] == "true",
       self_correct: params["self_correct"] == "true",
-      hallucinate_demo: params["answer_mode"] == "hallucinate"
+      hallucinate_demo: params["answer_mode"] == "hallucinate",
+      graph: params["graph_search"] == "true"
     )
   end
 
@@ -184,10 +208,10 @@ defmodule ArcanaWeb.AskLive do
     {:noreply, socket}
   end
 
-  defp run_simple_ask(question, repo, llm, selected_collections) do
-    opts = [repo: repo, llm: llm]
+  defp run_simple_ask(question, repo, llm, selected_collections, params) do
+    graph = params["graph_search"] == "true"
+    opts = [repo: repo, llm: llm, graph: graph]
 
-    # Add collection(s) option if user selected any
     opts =
       case selected_collections do
         [] -> opts
@@ -284,7 +308,11 @@ defmodule ArcanaWeb.AskLive do
   end
 
   defp build_search_opts(opts, all_collection_names) do
-    base = [self_correct: Keyword.get(opts, :self_correct, false)]
+    base = [
+      self_correct: Keyword.get(opts, :self_correct, false),
+      graph: Keyword.get(opts, :graph, false)
+    ]
+
     use_llm_select = Keyword.get(opts, :use_llm_select, false)
 
     if use_llm_select and length(all_collection_names) > 1 do
@@ -336,18 +364,18 @@ defmodule ArcanaWeb.AskLive do
 
         <div class="arcana-ask-mode-nav">
           <button
-            class={"arcana-mode-btn #{if @ask_mode == :simple, do: "active", else: ""}"}
-            phx-click="ask_switch_mode"
-            phx-value-mode="simple"
-          >
-            Simple
-          </button>
-          <button
             class={"arcana-mode-btn #{if @ask_mode == :agentic, do: "active", else: ""}"}
             phx-click="ask_switch_mode"
             phx-value-mode="agentic"
           >
             Agentic
+          </button>
+          <button
+            class={"arcana-mode-btn #{if @ask_mode == :simple, do: "active", else: ""}"}
+            phx-click="ask_switch_mode"
+            phx-value-mode="simple"
+          >
+            Simple
           </button>
         </div>
 
@@ -365,7 +393,7 @@ defmodule ArcanaWeb.AskLive do
           </div>
         <% end %>
 
-        <form id="ask-form" phx-submit="ask_submit" class="arcana-ask-form">
+        <form id="ask-form" phx-submit="ask_submit" phx-change="form_changed" class="arcana-ask-form">
           <input type="hidden" name="mode" value={@ask_mode} />
 
           <div class="arcana-ask-input">
@@ -375,17 +403,21 @@ defmodule ArcanaWeb.AskLive do
               rows="3"
               disabled={@ask_running}
             ><%= @ask_question %></textarea>
-          </div>
 
-          <%= if any_graph_enabled?(@collections) do %>
-            <div class="arcana-graph-toggle">
-              <label class="arcana-checkbox-label">
-                <input type="checkbox" name="graph_enhanced" value="true" disabled={@ask_running} />
-                <span>Graph-Enhanced</span>
-                <small>Uses entity/relationship context for better retrieval</small>
+            <%= if @ask_mode == :simple and selected_graph_enabled?(@collections, @selected_collections) do %>
+              <label class="arcana-deep-search-toggle">
+                <input
+                  type="checkbox"
+                  name="graph_search"
+                  value="true"
+                  checked={@graph_search}
+                  disabled={@ask_running}
+                />
+                <span>Graph-Assisted</span>
+                <small>Find results through entity relationships</small>
               </label>
-            </div>
-          <% end %>
+            <% end %>
+          </div>
 
           <div class="arcana-ask-collections">
             <label>Collections</label>
@@ -409,7 +441,13 @@ defmodule ArcanaWeb.AskLive do
               <div class="arcana-collection-checkboxes">
                 <%= for coll <- @collections do %>
                   <label class="arcana-collection-check">
-                    <input type="checkbox" name="collections[]" value={coll.name} disabled={@ask_running} />
+                    <input
+                      type="checkbox"
+                      name="collections[]"
+                      value={coll.name}
+                      checked={coll.name in @selected_collections}
+                      disabled={@ask_running}
+                    />
                     <span><%= coll.name %></span>
                   </label>
                 <% end %>
@@ -420,7 +458,14 @@ defmodule ArcanaWeb.AskLive do
 
           <%= if @ask_mode == :agentic do %>
             <div class="arcana-ask-options">
-              <h4>Pipeline</h4>
+              <h4>
+                Pipeline
+                <span style="font-size: 0.75em; font-weight: normal; opacity: 0.6;">
+                  <a href="#" onclick="this.closest('.arcana-ask-options').querySelectorAll('input[type=checkbox]').forEach(c => c.checked = true); return false">all</a>
+                  /
+                  <a href="#" onclick="this.closest('.arcana-ask-options').querySelectorAll('input[type=checkbox]').forEach(c => c.checked = false); return false">none</a>
+                </span>
+              </h4>
               <ol class="arcana-pipeline">
                 <li>
                   <label class="arcana-pipeline-step">
@@ -437,10 +482,26 @@ defmodule ArcanaWeb.AskLive do
                   </label>
                 </li>
                 <li>
-                  <div class="arcana-pipeline-step fixed">
-                    <span class="arcana-step-label">Search</span>
-                    <small>Retrieve relevant chunks</small>
-                  </div>
+                  <%= if selected_graph_enabled?(@collections, @selected_collections) do %>
+                    <div class="arcana-pipeline-fork">
+                      <label class="arcana-pipeline-step">
+                        <input type="radio" name="graph_search" value="false" disabled={@ask_running} />
+                        <span class="arcana-step-label">Search</span>
+                        <small>Retrieve relevant chunks</small>
+                      </label>
+                      <span class="arcana-fork-or">or</span>
+                      <label class="arcana-pipeline-step">
+                        <input type="radio" name="graph_search" value="true" checked disabled={@ask_running} />
+                        <span class="arcana-step-label">Graph-Assisted Search</span>
+                        <small>Find results through entity relationships</small>
+                      </label>
+                    </div>
+                  <% else %>
+                    <div class="arcana-pipeline-step fixed">
+                      <span class="arcana-step-label">Search</span>
+                      <small>Retrieve relevant chunks</small>
+                    </div>
+                  <% end %>
                 </li>
                 <li>
                   <label class="arcana-pipeline-step">
@@ -699,7 +760,7 @@ defmodule ArcanaWeb.AskLive do
             </summary>
             <%= if chunk do %>
               <div class="arcana-source-preview">
-                <%= String.slice(chunk.text, 0, 300) %><%= if String.length(chunk.text) > 300, do: "…", else: "" %>
+                <%= chunk.text %>
               </div>
             <% end %>
           </details>
