@@ -606,12 +606,13 @@ defmodule Arcana.Maintenance do
   def detect_communities(repo, opts \\ []) do
     progress_fn = Keyword.get(opts, :progress, fn _, _ -> :ok end)
     collection_filter = Keyword.get(opts, :collection)
-    resolution = Keyword.get(opts, :resolution, 1.0)
+    graph_config = Arcana.Graph.config()
+    resolution = Keyword.get(opts, :resolution, graph_config[:resolution] || 1.0)
     objective = Keyword.get(opts, :objective, :cpm)
     iterations = Keyword.get(opts, :iterations, 2)
     seed = Keyword.get(opts, :seed, 0)
-    min_size = Keyword.get(opts, :min_size, 1)
-    max_level = Keyword.get(opts, :max_level, 1)
+    min_size = Keyword.get(opts, :min_size, graph_config[:min_size] || 1)
+    max_level = Keyword.get(opts, :max_level, graph_config[:community_levels] || 1)
 
     collections = fetch_collections(repo, collection_filter)
 
@@ -855,55 +856,16 @@ defmodule Arcana.Maintenance do
           Enum.filter(communities, &CommunitySummarizer.needs_regeneration?/1)
         end
 
-      # Build entity ID to entity map for lookups
-      all_entity_ids =
-        communities
-        |> Enum.flat_map(& &1.entity_ids)
-        |> Enum.uniq()
-
-      entities_by_id =
-        if all_entity_ids == [] do
-          %{}
-        else
-          repo.all(
-            from(e in Entity,
-              where: e.id in ^all_entity_ids,
-              select: {e.id, %{id: e.id, name: e.name, type: e.type, description: e.description}}
-            )
-          )
-          |> Map.new()
-        end
-
-      # Fetch relationships for this collection
-      relationships =
-        repo.all(
-          from(r in Relationship,
-            join: src in Entity,
-            on: r.source_id == src.id,
-            join: tgt in Entity,
-            on: r.target_id == tgt.id,
-            where: src.collection_id == ^collection.id,
-            select: %{
-              source_id: r.source_id,
-              target_id: r.target_id,
-              source: src.name,
-              target: tgt.name,
-              type: r.type,
-              description: r.description
-            }
-          )
-        )
-
-      # Process communities (with optional concurrency)
+      # Process communities (with optional concurrency), fetching data per-community
       summaries_generated =
         if concurrency > 1 do
           to_summarize
           |> Task.async_stream(
             fn community ->
-              summarize_single_community(community, entities_by_id, relationships, llm, repo)
+              summarize_single_community(community, repo, llm)
             end,
             max_concurrency: concurrency,
-            timeout: 60_000
+            timeout: :infinity
           )
           |> Enum.count(fn
             {:ok, :ok} -> true
@@ -912,7 +874,7 @@ defmodule Arcana.Maintenance do
         else
           to_summarize
           |> Enum.count(fn community ->
-            summarize_single_community(community, entities_by_id, relationships, llm, repo) == :ok
+            summarize_single_community(community, repo, llm) == :ok
           end)
         end
 
@@ -920,22 +882,37 @@ defmodule Arcana.Maintenance do
     end
   end
 
-  defp summarize_single_community(community, entities_by_id, all_relationships, llm, repo) do
-    alias Arcana.Graph.{Community, CommunitySummarizer}
+  defp summarize_single_community(community, repo, llm) do
+    alias Arcana.Graph.{Community, CommunitySummarizer, Entity, Relationship}
 
-    # Get entities for this community
-    entity_ids = MapSet.new(community.entity_ids || [])
+    entity_ids = community.entity_ids || []
 
     entities =
-      community.entity_ids
-      |> Enum.map(&Map.get(entities_by_id, &1))
-      |> Enum.reject(&is_nil/1)
+      repo.all(
+        from(e in Entity,
+          where: e.id in ^entity_ids,
+          select: %{id: e.id, name: e.name, type: e.type, description: e.description}
+        )
+      )
 
-    # Filter relationships to those between community entities
     relationships =
-      Enum.filter(all_relationships, fn rel ->
-        MapSet.member?(entity_ids, rel.source_id) and MapSet.member?(entity_ids, rel.target_id)
-      end)
+      repo.all(
+        from(r in Relationship,
+          join: src in Entity,
+          on: r.source_id == src.id,
+          join: tgt in Entity,
+          on: r.target_id == tgt.id,
+          where: r.source_id in ^entity_ids and r.target_id in ^entity_ids,
+          select: %{
+            source_id: r.source_id,
+            target_id: r.target_id,
+            source: src.name,
+            target: tgt.name,
+            type: r.type,
+            description: r.description
+          }
+        )
+      )
 
     # Generate summary
     case CommunitySummarizer.summarize(entities, relationships, llm: llm) do

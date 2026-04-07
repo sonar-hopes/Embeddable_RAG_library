@@ -28,6 +28,7 @@ defmodule Arcana.Graph.GraphStore.Ecto do
     # Upsert each entity and build name -> id mapping
     entity_id_map =
       unique_entities
+      |> Enum.reject(fn e -> is_nil(e.name) or e.name == "" end)
       |> Enum.reduce(%{}, fn entity, id_map ->
         entity_record = upsert_entity(entity, collection_id, repo)
         Map.put(id_map, entity.name, entity_record.id)
@@ -45,7 +46,7 @@ defmodule Arcana.Graph.GraphStore.Ecto do
       source_id = Map.get(entity_id_map, rel.source)
       target_id = Map.get(entity_id_map, rel.target)
 
-      if source_id && target_id do
+      if source_id && target_id && rel.type && rel.type != "" do
         %Relationship{}
         |> Relationship.changeset(%{
           source_id: source_id,

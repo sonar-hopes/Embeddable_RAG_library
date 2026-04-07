@@ -138,7 +138,10 @@ defmodule Arcana.Search do
 
   defp enhance_with_graph_search({:ok, vector_results}, query, collections, repo, opts) do
     limit = Keyword.get(opts, :limit, 10)
+    graph_config = Arcana.Graph.config()
     entity_extractor = Arcana.Graph.resolve_entity_extractor(opts)
+    rrf_k = graph_config[:rrf_k] || 60
+    rrf_pool = graph_config[:rrf_pool_multiplier] || 2
 
     case EntityExtractor.extract(entity_extractor, query) do
       {:ok, entities} when entities != [] ->
@@ -147,7 +150,7 @@ defmodule Arcana.Search do
           %{query: query, entity_count: length(entities)},
           fn ->
             graph_results = graph_search_db(entities, collections, repo)
-            combined = rrf_combine(vector_results, graph_results, limit * 2)
+            combined = rrf_combine(vector_results, graph_results, limit * rrf_pool, rrf_k)
             final_results = Enum.take(combined, limit)
 
             caller_result = %{
@@ -313,12 +316,15 @@ defmodule Arcana.Search do
   end
 
   defp do_hybrid_rrf(query, params) do
-    semantic_params = %{params | limit: params.limit * 2}
-    fulltext_params = %{params | limit: params.limit * 2}
+    graph_config = Arcana.Graph.config()
+    pool = graph_config[:rrf_pool_multiplier] || 2
+    rrf_k = graph_config[:rrf_k] || 60
+    semantic_params = %{params | limit: params.limit * pool}
+    fulltext_params = %{params | limit: params.limit * pool}
 
     with {:ok, semantic_results} <- do_search(:semantic, query, semantic_params),
          {:ok, fulltext_results} <- do_search(:fulltext, query, fulltext_params) do
-      {:ok, rrf_combine(semantic_results, fulltext_results, params.limit)}
+      {:ok, rrf_combine(semantic_results, fulltext_results, params.limit, rrf_k)}
     end
   end
 

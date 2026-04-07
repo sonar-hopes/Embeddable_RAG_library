@@ -30,8 +30,23 @@ defmodule Arcana.Graph do
       config :arcana,
         graph: [
           enabled: true,
-          community_levels: 5,
-          resolution: 1.0
+
+          # Community detection
+          community_levels: 5,      # Hierarchy depth for Leiden algorithm
+          resolution: 1.0,          # Leiden granularity (lower = fewer, larger communities)
+          min_size: 1,              # Minimum community size
+
+          # RRF fusion (combining vector + graph search results)
+          rrf_k: 60,               # Ranking constant (higher = less weight to top ranks)
+          rrf_pool_multiplier: 2,  # Over-fetch multiplier before RRF combine
+
+          # Community summaries in ask pipeline
+          community_summary_limit: 5,  # Max summaries injected as background context
+          community_summary_level: 0,  # Hierarchy level to pull summaries from
+
+          # Community summarization prompt limits
+          summary_max_entities: 50,       # Top N entities by connection count per summary
+          summary_max_relationships: 100  # Top N relationships per summary
         ]
 
   Or enable per-call:
@@ -100,7 +115,14 @@ defmodule Arcana.Graph do
   @default_config %{
     enabled: false,
     community_levels: 5,
-    resolution: 1.0
+    resolution: 1.0,
+    min_size: 1,
+    rrf_k: 60,
+    rrf_pool_multiplier: 2,
+    community_summary_limit: 5,
+    community_summary_level: 0,
+    summary_max_entities: 50,
+    summary_max_relationships: 100
   }
 
   @doc """

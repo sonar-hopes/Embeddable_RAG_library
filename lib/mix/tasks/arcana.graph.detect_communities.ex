@@ -72,15 +72,18 @@ defmodule Mix.Tasks.Arcana.Graph.DetectCommunities do
 
     quiet = Keyword.get(opts, :quiet, false)
     collection = Keyword.get(opts, :collection)
-    resolution = Keyword.get(opts, :resolution, 1.0)
     objective = Keyword.get(opts, :objective, "cpm") |> String.to_atom()
     iterations = Keyword.get(opts, :iterations, 2)
     seed = Keyword.get(opts, :seed, 0)
-    min_size = Keyword.get(opts, :min_size, 1)
-    max_level = Keyword.get(opts, :max_level, 1)
 
     # Start the host application (which will start the repo)
     Mix.Task.run("app.start")
+
+    # Read from graph config, allow CLI overrides
+    graph_config = Arcana.Graph.config()
+    resolution = Keyword.get(opts, :resolution, graph_config[:resolution] || 1.0)
+    min_size = Keyword.get(opts, :min_size, graph_config[:min_size] || 1)
+    max_level = Keyword.get(opts, :max_level, graph_config[:community_levels] || 1)
 
     repo = Application.get_env(:arcana, :repo)
 

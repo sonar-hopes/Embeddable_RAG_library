@@ -163,11 +163,25 @@ defmodule Arcana.Graph.GraphExtractor.LLM do
 
   defp normalize_entity(entity) when is_map(entity) do
     %{
-      name: Map.get(entity, "name"),
+      name: to_string_or_nil(Map.get(entity, "name")),
       type: normalize_type(Map.get(entity, "type")),
       description: Map.get(entity, "description")
     }
   end
+
+  defp normalize_entity(entity) when is_binary(entity) do
+    %{name: entity, type: "other", description: nil}
+  end
+
+  defp normalize_entity(entity) when is_number(entity) do
+    %{name: to_string(entity), type: "other", description: nil}
+  end
+
+  defp normalize_entity(_), do: %{name: nil, type: "other", description: nil}
+
+  defp to_string_or_nil(nil), do: nil
+  defp to_string_or_nil(val) when is_binary(val), do: String.slice(val, 0, 255)
+  defp to_string_or_nil(val), do: to_string(val)
 
   defp normalize_type(nil), do: "other"
 

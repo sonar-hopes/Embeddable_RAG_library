@@ -81,13 +81,17 @@ defmodule Arcana.Embedder.Local do
     # Get defn_options from Nx config (includes compiler like EXLA or EMLX)
     defn_options = Nx.Defn.default_options()
 
+    batch_size = Keyword.get(opts, :batch_size, 32)
+    sequence_length = Keyword.get(opts, :sequence_length, 512)
+    batch_timeout = Keyword.get(opts, :batch_timeout, 100)
+
     serving =
       TextEmbedding.text_embedding(model_info, tokenizer,
-        compile: [batch_size: 32, sequence_length: 512],
+        compile: [batch_size: batch_size, sequence_length: sequence_length],
         defn_options: defn_options
       )
 
-    Nx.Serving.start_link(serving: serving, name: serving_name, batch_timeout: 100)
+    Nx.Serving.start_link(serving: serving, name: serving_name, batch_timeout: batch_timeout)
   end
 
   defp serving_name(model) do
