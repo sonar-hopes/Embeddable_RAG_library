@@ -261,10 +261,9 @@ defmodule Arcana.EvaluationTest do
         # Only the faithfulness check should reach this LLM. If a fresh
         # answer generation happened, we'd see a prompt with "Context:"
         # and "Question:" but NOT the pre-generated text.
-        cond do
-          prompt =~ "faithfulness" -> {:ok, ~s({"score": 8, "reasoning": "ok"})}
-          true -> {:ok, "fallback"}
-        end
+        if prompt =~ "faithfulness",
+          do: {:ok, ~s({"score": 8, "reasoning": "ok"})},
+          else: {:ok, "fallback"}
       end
 
       {:ok, run} =

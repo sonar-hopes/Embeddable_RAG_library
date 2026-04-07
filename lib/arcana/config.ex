@@ -252,32 +252,43 @@ defmodule Arcana.Config do
     allow_nil? = spec[:allow_nil?] || false
 
     cond do
-      is_nil(value) and allow_nil? ->
-        nil
-
-      value == false and allow_nil? ->
-        nil
-
-      is_atom(value) and Map.has_key?(shortcuts, value) ->
-        {Map.fetch!(shortcuts, value), []}
-
-      is_tuple(value) and tuple_size(value) == 2 and is_atom(elem(value, 0)) and
-        is_list(elem(value, 1)) and Map.has_key?(shortcuts, elem(value, 0)) ->
-        {Map.fetch!(shortcuts, elem(value, 0)), elem(value, 1)}
-
-      custom_arity && is_function(value, custom_arity) ->
-        if custom_module, do: {custom_module, [fun: value]}, else: {value, []}
-
-      is_atom(value) and not is_nil(value) ->
-        {value, []}
-
-      is_tuple(value) and tuple_size(value) == 2 and is_atom(elem(value, 0)) and
-          is_list(elem(value, 1)) ->
-        value
-
-      true ->
-        raise ArgumentError, "invalid #{name} config: #{inspect(value)}"
+      nil_or_false?(value, allow_nil?) -> nil
+      shortcut_atom?(value, shortcuts) -> {Map.fetch!(shortcuts, value), []}
+      shortcut_tuple?(value, shortcuts) -> shortcut_tuple_result(value, shortcuts)
+      custom_function?(value, custom_arity) -> custom_function_result(value, custom_module)
+      plain_module?(value) -> {value, []}
+      module_opts_tuple?(value) -> value
+      true -> raise ArgumentError, "invalid #{name} config: #{inspect(value)}"
     end
+  end
+
+  defp nil_or_false?(nil, true), do: true
+  defp nil_or_false?(false, true), do: true
+  defp nil_or_false?(_, _), do: false
+
+  defp shortcut_atom?(value, shortcuts) when is_atom(value),
+    do: Map.has_key?(shortcuts, value)
+
+  defp shortcut_atom?(_, _), do: false
+
+  defp shortcut_tuple?(value, shortcuts) do
+    module_opts_tuple?(value) and Map.has_key?(shortcuts, elem(value, 0))
+  end
+
+  defp shortcut_tuple_result({module, opts}, shortcuts),
+    do: {Map.fetch!(shortcuts, module), opts}
+
+  defp custom_function?(_value, nil), do: false
+  defp custom_function?(value, arity), do: is_function(value, arity)
+
+  defp custom_function_result(fun, nil), do: {fun, []}
+  defp custom_function_result(fun, module), do: {module, [fun: fun]}
+
+  defp plain_module?(value), do: is_atom(value) and not is_nil(value)
+
+  defp module_opts_tuple?(value) do
+    is_tuple(value) and tuple_size(value) == 2 and
+      is_atom(elem(value, 0)) and is_list(elem(value, 1))
   end
 
   @doc false

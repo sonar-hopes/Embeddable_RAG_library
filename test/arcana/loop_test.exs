@@ -10,6 +10,7 @@ defmodule Arcana.LoopTest do
 
   alias Arcana.Loop
   alias Arcana.Loop.Context
+  alias Arcana.Loop.Tools
 
   # Builds a stub controller that returns scripted responses one per call.
   # Each scripted response is either a `ReqLLM.Response.classify_result()`-shaped
@@ -64,7 +65,7 @@ defmodule Arcana.LoopTest do
       # model can do via sequential search calls. Anthropic's tool sprawl
       # guidance says drop tools that don't change agent behavior.
       tool_names =
-        Arcana.Loop.Tools.default()
+        Tools.default()
         |> Enum.map(& &1.name)
         |> Enum.sort()
 
@@ -1104,12 +1105,11 @@ defmodule Arcana.LoopTest do
 
   defp tool_message_text(%ReqLLM.Message{content: content}) when is_list(content) do
     content
-    |> Enum.map(fn
+    |> Enum.map_join("", fn
       %ReqLLM.Message.ContentPart{type: :text, text: text} -> text
       %{type: :text, text: text} -> text
       _ -> ""
     end)
-    |> Enum.join("")
   end
 
   defp tool_message_text(%ReqLLM.Message{content: text}) when is_binary(text), do: text

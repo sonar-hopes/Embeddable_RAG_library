@@ -17,6 +17,7 @@ defmodule Arcana.Maintenance do
 
   alias Arcana.{Chunk, Chunker, Collection, Document, Embedder}
   alias Arcana.Graph.{EntityMention, GraphStore}
+  alias Ecto.Adapters.SQL
 
   import Ecto.Query
 
@@ -388,45 +389,54 @@ defmodule Arcana.Maintenance do
     entities = repo.all(query)
     total = length(entities)
 
-    entities
-    |> Enum.chunk_every(batch_size)
-    |> Enum.with_index(1)
-    |> Enum.reduce(0, fn {batch, _batch_idx}, count ->
-      now = NaiveDateTime.utc_now()
-
-      # Embed concurrently so Nx.Serving can batch the requests
-      embedded =
-        batch
-        |> Task.async_stream(
-          fn entity ->
-            text =
-              case entity.description do
-                nil -> entity.name
-                "" -> entity.name
-                desc -> "#{entity.name}: #{desc}"
-              end
-
-            case Arcana.Embedder.embed(embedder, text, intent: :document) do
-              {:ok, embedding} -> {entity.id, embedding}
-              _ -> nil
-            end
-          end,
-          max_concurrency: 64,
-          timeout: :infinity
-        )
-        |> Enum.flat_map(fn
-          {:ok, {id, embedding}} -> [{id, embedding}]
-          _ -> []
-        end)
-
-      bulk_update_embeddings(embedded, now, repo)
-
-      new_count = count + length(batch)
-      progress_fn.(new_count, total)
-      new_count
-    end)
+    # The reduce's return value is intentionally discarded: we use the
+    # accumulator for per-batch progress reporting, not as a final result.
+    _ =
+      entities
+      |> Enum.chunk_every(batch_size)
+      |> Enum.with_index(1)
+      |> Enum.reduce(0, fn {batch, _batch_idx}, count ->
+        maintenance_batch(batch, count, total, embedder, progress_fn, repo)
+      end)
 
     {:ok, %{total: total}}
+  end
+
+  defp maintenance_batch(batch, count, total, embedder, progress_fn, repo) do
+    now = NaiveDateTime.utc_now()
+
+    # Embed concurrently so Nx.Serving can batch the requests
+    embedded =
+      batch
+      |> Task.async_stream(
+        fn entity -> embed_entity(entity, embedder) end,
+        max_concurrency: 64,
+        timeout: :infinity
+      )
+      |> Enum.flat_map(fn
+        {:ok, {id, embedding}} -> [{id, embedding}]
+        _ -> []
+      end)
+
+    bulk_update_embeddings(embedded, now, repo)
+
+    new_count = count + length(batch)
+    progress_fn.(new_count, total)
+    new_count
+  end
+
+  defp embed_entity(entity, embedder) do
+    text =
+      case entity.description do
+        nil -> entity.name
+        "" -> entity.name
+        desc -> "#{entity.name}: #{desc}"
+      end
+
+    case Arcana.Embedder.embed(embedder, text, intent: :document) do
+      {:ok, embedding} -> {entity.id, embedding}
+      _ -> nil
+    end
   end
 
   defp bulk_update_embeddings([], _now, _repo), do: :ok
@@ -443,7 +453,7 @@ defmodule Arcana.Maintenance do
         "[" <> Enum.map_join(vec, ",", &to_string/1) <> "]"
       end)
 
-    Ecto.Adapters.SQL.query!(
+    SQL.query!(
       repo,
       """
       UPDATE arcana_graph_entities AS e

@@ -28,11 +28,13 @@ defmodule Arcana.Graph.EntityMatcher.NER do
     repo = Keyword.fetch!(opts, :repo)
     extractor = Arcana.Graph.resolve_entity_extractor(opts)
 
-    with {:ok, entities} when entities != [] <- EntityExtractor.extract(extractor, query) do
-      entity_names = Enum.map(entities, & &1.name)
-      {:ok, lookup_ids_by_name(entity_names, collection_ids, repo)}
-    else
-      _ -> {:ok, []}
+    case EntityExtractor.extract(extractor, query) do
+      {:ok, [_ | _] = entities} ->
+        entity_names = Enum.map(entities, & &1.name)
+        {:ok, lookup_ids_by_name(entity_names, collection_ids, repo)}
+
+      _ ->
+        {:ok, []}
     end
   end
 

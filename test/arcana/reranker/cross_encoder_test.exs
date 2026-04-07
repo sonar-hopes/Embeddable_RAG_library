@@ -78,7 +78,7 @@ defmodule Arcana.Reranker.CrossEncoderTest do
 
       {:ok, results} = CrossEncoder.rerank("Dalek invasion", chunks, threshold: 0.0)
 
-      assert length(results) >= 1
+      assert results != []
       assert hd(results).id == "1"
     end
   end

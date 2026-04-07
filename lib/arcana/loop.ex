@@ -62,6 +62,7 @@ defmodule Arcana.Loop do
   """
 
   alias Arcana.Loop.{Context, SystemPrompt, Tools}
+  alias ReqLLM.Message.ContentPart
 
   @doc """
   Builds a new `Arcana.Loop.Context` for `run/2`.
@@ -575,7 +576,7 @@ defmodule Arcana.Loop do
     text = classified.text || ""
 
     content =
-      if text != "", do: [ReqLLM.Message.ContentPart.text(text)], else: []
+      if text != "", do: [ContentPart.text(text)], else: []
 
     canonical_tool_calls = Enum.map(tool_calls, &to_canonical_tool_call/1)
 

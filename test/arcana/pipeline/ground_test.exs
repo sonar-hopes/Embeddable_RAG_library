@@ -1,9 +1,9 @@
 defmodule Arcana.Pipeline.GroundTest do
   use ExUnit.Case, async: true
 
+  alias Arcana.Grounding.Result
   alias Arcana.Pipeline
   alias Arcana.Pipeline.Context
-  alias Arcana.Grounding.Result
 
   describe "ground/2" do
     test "grounds answer with custom grounder function" do
@@ -199,8 +199,8 @@ end
 defmodule Arcana.Pipeline.GroundPipelineTest do
   use Arcana.DataCase, async: true
 
-  alias Arcana.Pipeline
   alias Arcana.Grounding.Result
+  alias Arcana.Pipeline
 
   describe "pipeline integration" do
     setup do
