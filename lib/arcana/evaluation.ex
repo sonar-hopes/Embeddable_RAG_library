@@ -56,6 +56,11 @@ defmodule Arcana.Evaluation do
     * `:source_id` - Limit evaluation to specific source
     * `:evaluate_answers` - When true, also evaluates answer quality (default: false)
     * `:llm` - LLM function (required when evaluate_answers is true)
+    * `:retriever` - Custom retriever function `(question, opts) -> {:ok, chunks}`.
+      Defaults to `Arcana.search/2`. Use this to evaluate alternative retrieval
+      strategies (e.g., `Arcana.Loop`) against the same test set with the
+      same metrics. The chunks returned must be maps with `:id` so the
+      metrics can match them against the test case's `relevant_chunks`.
 
   """
   def run(opts) do
@@ -64,6 +69,7 @@ defmodule Arcana.Evaluation do
     source_id = Keyword.get(opts, :source_id)
     evaluate_answers = Keyword.get(opts, :evaluate_answers, false)
     llm = Keyword.get(opts, :llm)
+    retriever = Keyword.get(opts, :retriever, &default_retriever/2)
 
     # Validate llm is provided when evaluate_answers is true
     if evaluate_answers and is_nil(llm) do
@@ -97,7 +103,7 @@ defmodule Arcana.Evaluation do
       # Evaluate each test case
       case_results =
         Enum.map(test_cases, fn test_case ->
-          evaluate_test_case(test_case, repo, mode, evaluate_answers, llm)
+          evaluate_test_case(test_case, repo, mode, evaluate_answers, llm, retriever)
         end)
 
       # Aggregate metrics
@@ -106,7 +112,9 @@ defmodule Arcana.Evaluation do
       # Add answer metrics if evaluated
       metrics =
         if evaluate_answers do
-          Map.put(metrics, :faithfulness, average_faithfulness(case_results))
+          metrics
+          |> maybe_put_faithfulness(case_results)
+          |> maybe_put_correctness(case_results)
         else
           metrics
         end
@@ -131,16 +139,37 @@ defmodule Arcana.Evaluation do
     end
   end
 
-  defp evaluate_test_case(test_case, repo, mode, evaluate_answers, llm) do
-    {:ok, search_results} = Arcana.search(test_case.question, repo: repo, mode: mode, limit: 10)
+  defp evaluate_test_case(test_case, repo, mode, evaluate_answers, llm, retriever) do
+    {search_results, pre_generated_answer} =
+      case retriever.(test_case.question, repo: repo, mode: mode, limit: 10) do
+        {:ok, chunks} -> {chunks, nil}
+        {:ok, chunks, answer} -> {chunks, answer}
+        # A failing retriever (e.g. Arcana.search/2 returning {:error, _})
+        # used to crash the whole run with a CaseClauseError. Treat it as
+        # a miss for this test case so the rest of the run still completes.
+        {:error, _reason} -> {[], nil}
+      end
+
     retrieval_metrics = Metrics.evaluate_case(test_case, search_results)
 
     if evaluate_answers do
-      answer_metrics = evaluate_answer(test_case.question, search_results, llm)
+      answer_metrics =
+        evaluate_answer(
+          test_case.question,
+          search_results,
+          pre_generated_answer,
+          test_case.reference_answer,
+          llm
+        )
+
       Map.merge(retrieval_metrics, answer_metrics)
     else
       retrieval_metrics
     end
+  end
+
+  defp default_retriever(question, opts) do
+    Arcana.search(question, opts)
   end
 
   defp average_faithfulness(case_results) do
@@ -149,13 +178,42 @@ defmodule Arcana.Evaluation do
       |> Enum.map(& &1.faithfulness_score)
       |> Enum.reject(&is_nil/1)
 
-    if Enum.empty?(scores), do: 0.0, else: Enum.sum(scores) / length(scores)
+    if Enum.empty?(scores), do: nil, else: Enum.sum(scores) / length(scores)
   end
 
-  defp evaluate_answer(question, search_results, llm) do
-    alias Arcana.Evaluation.AnswerMetrics
+  defp average_correctness(case_results) do
+    scores =
+      case_results
+      |> Enum.map(&Map.get(&1, :correctness_score))
+      |> Enum.reject(&is_nil/1)
 
-    # Generate answer using the search results as context
+    if Enum.empty?(scores), do: nil, else: Enum.sum(scores) / length(scores)
+  end
+
+  defp maybe_put_faithfulness(metrics, case_results) do
+    case average_faithfulness(case_results) do
+      nil -> metrics
+      avg -> Map.put(metrics, :faithfulness, avg)
+    end
+  end
+
+  defp maybe_put_correctness(metrics, case_results) do
+    case average_correctness(case_results) do
+      nil -> metrics
+      avg -> Map.put(metrics, :correctness, avg)
+    end
+  end
+
+  defp evaluate_answer(question, search_results, pre_generated, reference_answer, llm) do
+    answer = pre_generated || generate_answer(question, search_results, llm)
+
+    faithfulness = score_faithfulness(question, search_results, answer, llm)
+    correctness = score_correctness(question, answer, reference_answer, llm)
+
+    Map.merge(faithfulness, correctness)
+  end
+
+  defp generate_answer(question, search_results, llm) do
     chunks_text = Enum.map_join(search_results, "\n\n", & &1.text)
 
     answer_prompt = """
@@ -169,27 +227,49 @@ defmodule Arcana.Evaluation do
     Answer:
     """
 
-    answer =
-      case Arcana.LLM.complete(llm, answer_prompt, [], []) do
-        {:ok, response} -> response
-        {:error, _} -> nil
-      end
+    case Arcana.LLM.complete(llm, answer_prompt, [], []) do
+      {:ok, response} -> response
+      {:error, _} -> nil
+    end
+  end
 
-    # Evaluate faithfulness if we got an answer
-    if answer do
-      case AnswerMetrics.evaluate_faithfulness(question, search_results, answer, llm: llm) do
-        {:ok, %{score: score, reasoning: reasoning}} ->
-          %{
-            answer: answer,
-            faithfulness_score: score,
-            faithfulness_reasoning: reasoning
-          }
+  defp score_faithfulness(_question, _chunks, nil, _llm) do
+    %{answer: nil, faithfulness_score: nil, faithfulness_reasoning: nil}
+  end
 
-        {:error, _} ->
-          %{answer: answer, faithfulness_score: nil, faithfulness_reasoning: nil}
-      end
-    else
-      %{answer: nil, faithfulness_score: nil, faithfulness_reasoning: nil}
+  defp score_faithfulness(question, chunks, answer, llm) do
+    alias Arcana.Evaluation.AnswerMetrics
+
+    case AnswerMetrics.evaluate_faithfulness(question, chunks, answer, llm: llm) do
+      {:ok, %{score: score, reasoning: reasoning}} ->
+        %{
+          answer: answer,
+          faithfulness_score: score,
+          faithfulness_reasoning: reasoning
+        }
+
+      {:error, _} ->
+        %{answer: answer, faithfulness_score: nil, faithfulness_reasoning: nil}
+    end
+  end
+
+  defp score_correctness(_question, _answer, nil, _llm) do
+    %{correctness_score: nil, correctness_reasoning: nil}
+  end
+
+  defp score_correctness(_question, nil, _reference, _llm) do
+    %{correctness_score: nil, correctness_reasoning: nil}
+  end
+
+  defp score_correctness(question, answer, reference_answer, llm) do
+    alias Arcana.Evaluation.AnswerMetrics
+
+    case AnswerMetrics.evaluate_correctness(question, answer, reference_answer, llm: llm) do
+      {:ok, %{score: score, reasoning: reasoning}} ->
+        %{correctness_score: score, correctness_reasoning: reasoning}
+
+      {:error, _} ->
+        %{correctness_score: nil, correctness_reasoning: nil}
     end
   end
 
@@ -242,16 +322,23 @@ defmodule Arcana.Evaluation do
     * `:repo` - Ecto repo (required)
     * `:question` - The question text (required)
     * `:relevant_chunk_ids` - List of chunk IDs considered relevant (required)
+    * `:reference_answer` - Optional ground-truth answer text, used by
+      correctness scoring in `run/1` when an `:answerer` is configured.
 
   """
   def create_test_case(opts) do
     repo = Keyword.fetch!(opts, :repo)
     question = Keyword.fetch!(opts, :question)
     chunk_ids = Keyword.fetch!(opts, :relevant_chunk_ids)
+    reference_answer = Keyword.get(opts, :reference_answer)
 
     test_case =
       %TestCase{}
-      |> TestCase.changeset(%{question: question, source: :manual})
+      |> TestCase.changeset(%{
+        question: question,
+        source: :manual,
+        reference_answer: reference_answer
+      })
       |> repo.insert!()
 
     # Link relevant chunks (convert UUIDs to binary for insert_all)

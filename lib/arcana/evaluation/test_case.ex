@@ -17,6 +17,7 @@ defmodule Arcana.Evaluation.TestCase do
   schema "arcana_evaluation_test_cases" do
     field(:question, :string)
     field(:source, Ecto.Enum, values: [:synthetic, :manual], default: :synthetic)
+    field(:reference_answer, :string)
 
     belongs_to(:source_chunk, Chunk)
     many_to_many(:relevant_chunks, Chunk, join_through: "arcana_evaluation_test_case_chunks")
@@ -26,7 +27,7 @@ defmodule Arcana.Evaluation.TestCase do
 
   def changeset(test_case, attrs) do
     test_case
-    |> cast(attrs, [:question, :source, :source_chunk_id])
+    |> cast(attrs, [:question, :source, :source_chunk_id, :reference_answer])
     |> validate_required([:question, :source])
     |> validate_length(:question, min: 1)
     |> foreign_key_constraint(:source_chunk_id)

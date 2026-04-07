@@ -207,10 +207,109 @@ defmodule Arcana.EvaluationTest do
       end
     end
 
+    test "uses a custom :retriever function when provided", %{
+      test_cases: test_cases,
+      chunks: chunks
+    } do
+      # Custom retriever that always returns the elixir chunk regardless
+      # of question. This proves the retriever is actually being called.
+      retriever = fn _question, _opts ->
+        send(self(), :retriever_called)
+        {:ok, [%{id: chunks.elixir.id, text: chunks.elixir.text, score: 0.99}]}
+      end
+
+      {:ok, run} = Evaluation.run(repo: Repo, retriever: retriever)
+
+      assert_received :retriever_called
+      assert run.status == :completed
+
+      # The elixir test case should hit at k=1 (the retriever returned
+      # the elixir chunk and that's what the elixir test case expects).
+      elixir_tc = Enum.find(test_cases, &(&1.question == "What is Elixir?"))
+      result = run.results[elixir_tc.id]
+      assert result.hit[1] == true
+      assert result.reciprocal_rank == 1.0
+
+      # The python test case should miss (the retriever always returns
+      # the elixir chunk, which is wrong for python).
+      python_tc = Enum.find(test_cases, &(&1.question == "What is Python used for?"))
+      result = run.results[python_tc.id]
+      assert result.hit[1] == false
+      assert result.reciprocal_rank == 0.0
+    end
+
     test "without evaluate_answers does not include answer metrics", %{test_cases: _test_cases} do
       {:ok, run} = Evaluation.run(repo: Repo, mode: :semantic)
 
       refute Map.has_key?(run.metrics, :faithfulness)
+    end
+
+    test "accepts retriever that also returns a pre-generated answer", %{
+      test_cases: [tc1, _tc2],
+      chunks: chunks
+    } do
+      # Retriever returns a 3-tuple: {:ok, chunks, answer}. The eval should
+      # use the provided answer instead of generating a new one. This is the
+      # path Loop uses — the loop already produced an answer and we don't
+      # want to regenerate one.
+      retriever = fn _q, _opts ->
+        {:ok, [%{id: chunks.elixir.id, text: chunks.elixir.text, score: 0.9}],
+         "Pre-generated answer from the retriever."}
+      end
+
+      llm = fn prompt ->
+        # Only the faithfulness check should reach this LLM. If a fresh
+        # answer generation happened, we'd see a prompt with "Context:"
+        # and "Question:" but NOT the pre-generated text.
+        cond do
+          prompt =~ "faithfulness" -> {:ok, ~s({"score": 8, "reasoning": "ok"})}
+          true -> {:ok, "fallback"}
+        end
+      end
+
+      {:ok, run} =
+        Evaluation.run(repo: Repo, retriever: retriever, evaluate_answers: true, llm: llm)
+
+      result = run.results[tc1.id]
+      assert result.answer == "Pre-generated answer from the retriever."
+      assert is_number(result.faithfulness_score)
+    end
+
+    test "runs correctness scoring when test case has a reference_answer", %{chunks: chunks} do
+      # Create a test case with a reference answer.
+      {:ok, tc} =
+        Evaluation.create_test_case(
+          repo: Repo,
+          question: "What is Elixir?",
+          relevant_chunk_ids: [chunks.elixir.id],
+          reference_answer: "Elixir is a functional language."
+        )
+
+      retriever = fn _q, _opts ->
+        {:ok, [%{id: chunks.elixir.id, text: chunks.elixir.text, score: 0.9}],
+         "Elixir runs on the BEAM and is functional."}
+      end
+
+      llm = fn prompt ->
+        cond do
+          prompt =~ "faithfulness" ->
+            {:ok, ~s({"score": 9, "reasoning": "faithful"})}
+
+          prompt =~ "correctness" or prompt =~ "Reference answer" ->
+            {:ok, ~s({"score": 7, "reasoning": "conveys the same core fact"})}
+
+          true ->
+            {:ok, "fallback"}
+        end
+      end
+
+      {:ok, run} =
+        Evaluation.run(repo: Repo, retriever: retriever, evaluate_answers: true, llm: llm)
+
+      result = run.results[tc.id]
+      assert result.correctness_score == 7
+      assert result.correctness_reasoning =~ "same core"
+      assert is_float(run.metrics.correctness)
     end
   end
 
