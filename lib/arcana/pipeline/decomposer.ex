@@ -1,6 +1,6 @@
 defmodule Arcana.Pipeline.Decomposer do
   @moduledoc """
-  Behaviour for query decomposition in the Agent pipeline.
+  Behaviour for query decomposition in `Arcana.Pipeline`.
 
   The decomposer breaks complex questions into simpler sub-questions
   that can be searched independently, improving retrieval for multi-faceted queries.

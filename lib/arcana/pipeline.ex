@@ -39,9 +39,10 @@ defmodule Arcana.Pipeline do
 
   ## How agentic is this?
 
-  Arcana's Agent pipeline is a composed sequence of steps you wire together
+  `Arcana.Pipeline` is a composed sequence of steps you wire together
   once. It's not a fully autonomous loop where an LLM decides its next
-  action (like ReAct). The "agentic" parts live inside specific steps:
+  action (like ReAct) — that's what `Arcana.Loop` is for. The "agentic"
+  parts of the pipeline live inside specific steps:
 
     * `gate/2` — LLM decides whether retrieval is needed at all
     * `search(self_correct: true)` — retries with rewritten queries when
@@ -75,7 +76,7 @@ defmodule Arcana.Pipeline do
   alias Arcana.Pipeline.Context
 
   @doc """
-  Creates a new agent context.
+  Creates a new pipeline context.
 
   ## Options
 
@@ -135,7 +136,7 @@ defmodule Arcana.Pipeline do
   def gate(%Context{} = ctx, opts) do
     start_metadata = %{question: ctx.question}
 
-    :telemetry.span([:arcana, :agent, :gate], start_metadata, fn ->
+    :telemetry.span([:arcana, :pipeline, :gate], start_metadata, fn ->
       llm = Keyword.get(opts, :llm, ctx.llm)
       custom_prompt_fn = Keyword.get(opts, :prompt)
 
@@ -236,7 +237,7 @@ defmodule Arcana.Pipeline do
       rewriter: rewriter_name(rewriter)
     }
 
-    :telemetry.span([:arcana, :agent, :rewrite], start_metadata, fn ->
+    :telemetry.span([:arcana, :pipeline, :rewrite], start_metadata, fn ->
       llm = Keyword.get(opts, :llm, ctx.llm)
       rewriter_opts = Keyword.merge(opts, llm: llm)
 
@@ -329,7 +330,7 @@ defmodule Arcana.Pipeline do
       selector: selector_name(selector)
     }
 
-    :telemetry.span([:arcana, :agent, :select], start_metadata, fn ->
+    :telemetry.span([:arcana, :pipeline, :select], start_metadata, fn ->
       llm = Keyword.get(opts, :llm, ctx.llm)
       selector_opts = Keyword.merge(opts, llm: llm)
 
@@ -424,7 +425,7 @@ defmodule Arcana.Pipeline do
       expander: expander_name(expander)
     }
 
-    :telemetry.span([:arcana, :agent, :expand], start_metadata, fn ->
+    :telemetry.span([:arcana, :pipeline, :expand], start_metadata, fn ->
       llm = Keyword.get(opts, :llm, ctx.llm)
       expander_opts = Keyword.merge(opts, llm: llm)
 
@@ -497,7 +498,7 @@ defmodule Arcana.Pipeline do
       decomposer: decomposer_name(decomposer)
     }
 
-    :telemetry.span([:arcana, :agent, :decompose], start_metadata, fn ->
+    :telemetry.span([:arcana, :pipeline, :decompose], start_metadata, fn ->
       llm = Keyword.get(opts, :llm, ctx.llm)
       decomposer_opts = Keyword.merge(opts, llm: llm)
 
@@ -548,7 +549,7 @@ defmodule Arcana.Pipeline do
 
   ## Options
 
-  - `:searcher` - Custom searcher module or function (default: `Arcana.Pipeline.Searcher.Arcana`)
+  - `:searcher` - Custom searcher module or function (default: `Arcana.Searcher.Arcana`)
   - `:collection` - Single collection name to search (string)
   - `:collections` - List of collection names to search
   - `:self_correct` - Enable self-correcting search (default: false)
@@ -572,7 +573,7 @@ defmodule Arcana.Pipeline do
 
   ## Custom Searcher
 
-      # Module implementing Arcana.Pipeline.Searcher behaviour
+      # Module implementing Arcana.Searcher behaviour
       Pipeline.search(ctx, searcher: MyApp.ElasticsearchSearcher)
 
       # Inline function
@@ -595,7 +596,7 @@ defmodule Arcana.Pipeline do
   def search(%Context{skip_retrieval: true} = ctx, _opts), do: %{ctx | results: []}
 
   def search(%Context{} = ctx, opts) do
-    searcher = Keyword.get(opts, :searcher, Arcana.Pipeline.Searcher.Arcana)
+    searcher = Keyword.get(opts, :searcher, Arcana.Searcher.Arcana)
 
     # Collection priority: option > ctx.collections > default
     collections =
@@ -613,7 +614,7 @@ defmodule Arcana.Pipeline do
       searcher: searcher_name(searcher)
     }
 
-    :telemetry.span([:arcana, :agent, :search], start_metadata, fn ->
+    :telemetry.span([:arcana, :pipeline, :search], start_metadata, fn ->
       questions = ctx.sub_questions || [ctx.expanded_query || ctx.question]
       searcher_opts = [repo: ctx.repo, limit: ctx.limit, threshold: ctx.threshold]
 
@@ -687,7 +688,7 @@ defmodule Arcana.Pipeline do
   def reason(%Context{} = ctx, opts) do
     start_metadata = %{question: ctx.question}
 
-    :telemetry.span([:arcana, :agent, :reason], start_metadata, fn ->
+    :telemetry.span([:arcana, :pipeline, :reason], start_metadata, fn ->
       llm = Keyword.get(opts, :llm, ctx.llm)
       max_iterations = Keyword.get(opts, :max_iterations, 2)
       custom_prompt_fn = Keyword.get(opts, :prompt)
@@ -890,7 +891,7 @@ defmodule Arcana.Pipeline do
   def rerank(%Context{results: []} = ctx, _opts), do: %{ctx | rerank_scores: %{}}
 
   def rerank(%Context{} = ctx, opts) do
-    reranker = Keyword.get(opts, :reranker, Arcana.Pipeline.Reranker.LLM)
+    reranker = Keyword.get(opts, :reranker, Arcana.Reranker.LLM)
     threshold = Keyword.get(opts, :threshold, 7)
     prompt_fn = Keyword.get(opts, :prompt)
 
@@ -899,7 +900,7 @@ defmodule Arcana.Pipeline do
       reranker: reranker_name(reranker)
     }
 
-    :telemetry.span([:arcana, :agent, :rerank], start_metadata, fn ->
+    :telemetry.span([:arcana, :pipeline, :rerank], start_metadata, fn ->
       all_chunks_before =
         ctx.results
         |> Enum.flat_map(& &1.chunks)
@@ -997,7 +998,7 @@ defmodule Arcana.Pipeline do
       answerer: answerer_name(answerer)
     }
 
-    :telemetry.span([:arcana, :agent, :answer], start_metadata, fn ->
+    :telemetry.span([:arcana, :pipeline, :answer], start_metadata, fn ->
       llm = Keyword.get(opts, :llm, ctx.llm)
       self_correct = Keyword.get(opts, :self_correct, false)
       max_corrections = Keyword.get(opts, :max_corrections, 2)
@@ -1087,7 +1088,7 @@ defmodule Arcana.Pipeline do
   defp do_self_correct_loop(ctx, correction_opts, count, history) do
     %{llm: llm, chunks: chunks} = correction_opts
 
-    :telemetry.span([:arcana, :agent, :self_correct], %{attempt: count + 1}, fn ->
+    :telemetry.span([:arcana, :pipeline, :self_correct], %{attempt: count + 1}, fn ->
       evaluate_answer(llm, ctx.question, ctx.answer, chunks)
       |> handle_evaluation_result(ctx, correction_opts, count, history)
     end)
@@ -1209,11 +1210,11 @@ defmodule Arcana.Pipeline do
   Uses NLI scoring to check each sentence in the answer against the
   retrieved context, producing a grounding score and hallucinated spans.
 
-  By default uses `Arcana.Pipeline.Grounder.Hallmark` (Vectara HHEM via Bumblebee).
+  By default uses `Arcana.Grounder.Hallmark` (Vectara HHEM via Bumblebee).
 
   ## Options
 
-  - `:grounder` - Custom grounder module or function (default: `Arcana.Pipeline.Grounder.Hallmark`)
+  - `:grounder` - Custom grounder module or function (default: `Arcana.Grounder.Hallmark`)
 
   ## Example
 
@@ -1230,7 +1231,7 @@ defmodule Arcana.Pipeline do
 
   ## Custom Grounder
 
-      # Module implementing Arcana.Pipeline.Grounder behaviour
+      # Module implementing Arcana.Grounder behaviour
       Pipeline.ground(ctx, grounder: MyApp.LLMGrounder)
 
       # Inline function
@@ -1245,14 +1246,14 @@ defmodule Arcana.Pipeline do
   def ground(%Context{answer: nil} = ctx, _opts), do: ctx
 
   def ground(%Context{} = ctx, opts) do
-    grounder = Keyword.get(opts, :grounder, Arcana.Pipeline.Grounder.Hallmark)
+    grounder = Keyword.get(opts, :grounder, Arcana.Grounder.Hallmark)
 
     start_metadata = %{
       question: ctx.question,
       grounder: grounder_name(grounder)
     }
 
-    :telemetry.span([:arcana, :agent, :ground], start_metadata, fn ->
+    :telemetry.span([:arcana, :pipeline, :ground], start_metadata, fn ->
       chunks = ctx.context_used || []
       grounder_opts = Keyword.merge(opts, question: ctx.question)
 

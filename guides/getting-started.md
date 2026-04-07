@@ -273,7 +273,7 @@ false
   collection: "products"
 )
 
-# With collection description (helps Agent.select/2 route to the right collection)
+# With collection description (helps Pipeline.select/2 route to the right collection)
 {:ok, document} = Arcana.ingest(
   "API reference",
   repo: MyApp.Repo,
@@ -333,9 +333,9 @@ end
 
 See the [LLM Integration](llm-integration.md) guide for production-ready LLM integration.
 
-## Agentic RAG Pipeline
+## Pipeline (Modular RAG)
 
-For more control over the RAG process, use the Agent pipeline:
+For more control over the RAG process, use `Arcana.Pipeline`. See the [Pipeline guide](pipeline.md) for the full reference; this section just shows the shape.
 
 ```elixir
 alias Arcana.Pipeline
@@ -343,11 +343,11 @@ alias Arcana.Pipeline
 llm = fn prompt -> {:ok, "LLM response"} end
 
 ctx =
-  Agent.new("Compare Elixir and Erlang", repo: MyApp.Repo, llm: llm)
-  |> Agent.select(collections: ["elixir-docs", "erlang-docs"])
-  |> Agent.expand()
-  |> Agent.search()
-  |> Agent.answer()
+  Pipeline.new("Compare Elixir and Erlang", repo: MyApp.Repo, llm: llm)
+  |> Pipeline.select(collections: ["elixir-docs", "erlang-docs"])
+  |> Pipeline.expand()
+  |> Pipeline.search()
+  |> Pipeline.answer()
 
 ctx.answer
 ```
@@ -373,8 +373,8 @@ Use **`expand/2`** when queries contain abbreviations, jargon, or domain-specifi
 # After expand: "ML machine learning artificial intelligence models algorithms"
 
 ctx
-|> Agent.expand()
-|> Agent.search()
+|> Pipeline.expand()
+|> Pipeline.search()
 ```
 
 Use **`decompose/2`** when questions have multiple parts:
@@ -384,17 +384,17 @@ Use **`decompose/2`** when questions have multiple parts:
 # After decompose: ["What is X?", "How does it compare to Y?"]
 
 ctx
-|> Agent.decompose()
-|> Agent.search()  # Searches each sub-question
+|> Pipeline.decompose()
+|> Pipeline.search()  # Searches each sub-question
 ```
 
 You can combine both:
 
 ```elixir
 ctx
-|> Agent.expand()      # Adds synonyms to the original question
-|> Agent.decompose()   # Splits into sub-questions
-|> Agent.search()      # Searches each expanded sub-question
+|> Pipeline.expand()      # Adds synonyms to the original question
+|> Pipeline.decompose()   # Splits into sub-questions
+|> Pipeline.search()      # Searches each expanded sub-question
 ```
 
 ### Self-Correcting Search
@@ -403,10 +403,10 @@ Enable automatic query refinement when results are insufficient:
 
 ```elixir
 ctx
-|> Agent.search(self_correct: true, max_iterations: 3)
+|> Pipeline.search(self_correct: true, max_iterations: 3)
 ```
 
-The agent will:
+The pipeline will:
 1. Execute the search
 2. Ask the LLM if results are sufficient
 3. If not, rewrite the query and retry
@@ -418,9 +418,9 @@ Improve result quality by re-scoring chunks after retrieval:
 
 ```elixir
 ctx
-|> Agent.search()
-|> Agent.rerank(threshold: 7)  # Keep chunks scoring 7+/10
-|> Agent.answer()
+|> Pipeline.search()
+|> Pipeline.rerank(threshold: 7)  # Keep chunks scoring 7+/10
+|> Pipeline.answer()
 ```
 
 The LLM scores each chunk's relevance to the question. Chunks below the threshold are filtered out, and remaining chunks are sorted by score.
@@ -430,7 +430,7 @@ For custom re-ranking logic (e.g., cross-encoder models):
 ```elixir
 # Custom reranker module
 defmodule MyApp.CrossEncoderReranker do
-  @behaviour Arcana.Pipeline.Reranker
+  @behaviour Arcana.Reranker
 
   @impl true
   def rerank(question, chunks, _opts) do
@@ -439,7 +439,7 @@ defmodule MyApp.CrossEncoderReranker do
   end
 end
 
-ctx |> Agent.rerank(reranker: MyApp.CrossEncoderReranker)
+ctx |> Pipeline.rerank(reranker: MyApp.CrossEncoderReranker)
 ```
 
 ## Query Rewriting
@@ -502,7 +502,8 @@ Events follow the `:telemetry.span/3` convention with `:start`, `:stop`, and `:e
 ## Next Steps
 
 - [LLM Integration](llm-integration.md) - Connect Arcana to LLMs
-- [Agentic RAG](agentic-rag.md) - Build sophisticated RAG pipelines
+- [Pipeline (Modular RAG)](pipeline.md) - Compose retrieval steps yourself
+- [Loop (Agentic RAG)](loop.md) - Let an LLM drive tool calls until it can answer
 - [Re-ranking](reranking.md) - Improve retrieval quality
 - [Search Algorithms](search-algorithms.md) - Hybrid search modes
 - [Evaluation](evaluation.md) - Measure retrieval quality

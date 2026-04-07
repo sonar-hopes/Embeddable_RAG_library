@@ -1,4 +1,4 @@
-defmodule Arcana.Pipeline.Searcher.Arcana do
+defmodule Arcana.Searcher.Arcana do
   @moduledoc """
   Default searcher using Arcana's built-in pgvector search.
 
@@ -7,14 +7,14 @@ defmodule Arcana.Pipeline.Searcher.Arcana do
 
   ## Usage
 
-      # With Agent pipeline (this is the default)
+      # With Arcana.Pipeline (this is the default)
       ctx
       |> Pipeline.search()
       |> Pipeline.answer()
 
       # Explicitly specifying the searcher
       ctx
-      |> Pipeline.search(searcher: Arcana.Pipeline.Searcher.Arcana)
+      |> Pipeline.search(searcher: Arcana.Searcher.Arcana)
       |> Pipeline.answer()
 
   ## Options
@@ -25,9 +25,9 @@ defmodule Arcana.Pipeline.Searcher.Arcana do
   - `:threshold` - Minimum similarity threshold (default: 0.5)
   """
 
-  @behaviour Arcana.Pipeline.Searcher
+  @behaviour Arcana.Searcher
 
-  @impl Arcana.Pipeline.Searcher
+  @impl Arcana.Searcher
   def search(question, collection, opts) do
     repo = Keyword.fetch!(opts, :repo)
     limit = Keyword.get(opts, :limit, 5)

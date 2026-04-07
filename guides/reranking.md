@@ -6,7 +6,7 @@ Improve retrieval quality by re-scoring and filtering search results before answ
 
 Re-ranking is a second-stage retrieval step that scores each chunk based on relevance to the question, filters by a threshold, and re-sorts by score. This improves answer quality by ensuring only the most relevant context reaches the LLM.
 
-## Using Re-ranking in the Agent Pipeline
+## Using Re-ranking in the Pipeline
 
 ```elixir
 alias Arcana.Pipeline
@@ -14,10 +14,10 @@ alias Arcana.Pipeline
 llm = fn prompt -> {:ok, LangChain.chat(prompt)} end
 
 ctx =
-  Agent.new("What is Elixir?", repo: MyApp.Repo, llm: llm)
-  |> Agent.search()
-  |> Agent.rerank()      # Re-rank before answering
-  |> Agent.answer()
+  Pipeline.new("What is Elixir?", repo: MyApp.Repo, llm: llm)
+  |> Pipeline.search()
+  |> Pipeline.rerank()      # Re-rank before answering
+  |> Pipeline.answer()
 
 ctx.answer
 ```
@@ -30,10 +30,10 @@ The threshold (0-10) filters out low-relevance chunks:
 
 ```elixir
 # Keep only highly relevant chunks (score >= 8)
-Agent.rerank(ctx, threshold: 8)
+Pipeline.rerank(ctx, threshold: 8)
 
 # More permissive (score >= 5)
-Agent.rerank(ctx, threshold: 5)
+Pipeline.rerank(ctx, threshold: 5)
 ```
 
 Default threshold is 7.
@@ -55,20 +55,20 @@ custom_prompt = fn question, chunk_text ->
   """
 end
 
-Agent.rerank(ctx, prompt: custom_prompt)
+Pipeline.rerank(ctx, prompt: custom_prompt)
 ```
 
 ## Custom Rerankers
 
 ### Implementing the Behaviour
 
-Create a custom reranker by implementing `Arcana.Pipeline.Reranker`:
+Create a custom reranker by implementing `Arcana.Reranker`:
 
 ```elixir
 defmodule MyApp.CrossEncoderReranker do
-  @behaviour Arcana.Pipeline.Reranker
+  @behaviour Arcana.Reranker
 
-  @impl Arcana.Pipeline.Reranker
+  @impl Arcana.Reranker
   def rerank(question, chunks, opts) do
     threshold = Keyword.get(opts, :threshold, 0.5)
 
@@ -95,7 +95,7 @@ end
 Use it:
 
 ```elixir
-Agent.rerank(ctx, reranker: MyApp.CrossEncoderReranker)
+Pipeline.rerank(ctx, reranker: MyApp.CrossEncoderReranker)
 ```
 
 ### Inline Function
@@ -103,7 +103,7 @@ Agent.rerank(ctx, reranker: MyApp.CrossEncoderReranker)
 For simple cases, pass a function directly:
 
 ```elixir
-Agent.rerank(ctx, reranker: fn question, chunks, _opts ->
+Pipeline.rerank(ctx, reranker: fn question, chunks, _opts ->
   # Your custom logic
   filtered = Enum.filter(chunks, &relevant?(&1, question))
   {:ok, filtered}
@@ -112,7 +112,7 @@ end)
 
 ## Built-in Rerankers
 
-### Arcana.Pipeline.Reranker.LLM (Default)
+### Arcana.Reranker.LLM (Default)
 
 Uses your LLM to score each chunk:
 
@@ -123,7 +123,7 @@ Uses your LLM to score each chunk:
 
 This is the default when you call `Arcana.Pipeline.rerank/2`.
 
-### Arcana.Pipeline.Reranker.ColBERT
+### Arcana.Reranker.ColBERT
 
 ColBERT-style neural reranking using per-token embeddings and MaxSim scoring. Provides more nuanced relevance scoring than single-vector methods by matching individual query tokens to document tokens.
 
@@ -136,10 +136,10 @@ Add the optional dependency:
 Use it:
 
 ```elixir
-Agent.rerank(ctx, reranker: Arcana.Pipeline.Reranker.ColBERT)
+Pipeline.rerank(ctx, reranker: Arcana.Reranker.ColBERT)
 
 # With options
-Agent.rerank(ctx, reranker: {Arcana.Pipeline.Reranker.ColBERT, top_k: 5})
+Pipeline.rerank(ctx, reranker: {Arcana.Reranker.ColBERT, top_k: 5})
 ```
 
 **Options:**
@@ -170,7 +170,7 @@ Re-ranking emits telemetry events:
 ```elixir
 :telemetry.attach(
   "rerank-logger",
-  [:arcana, :agent, :rerank, :stop],
+  [:arcana, :pipeline, :rerank, :stop],
   fn _event, measurements, metadata, _config ->
     IO.puts("Reranked: #{metadata.chunks_before} -> #{metadata.chunks_after} chunks")
   end,

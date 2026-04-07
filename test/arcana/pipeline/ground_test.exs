@@ -79,9 +79,9 @@ defmodule Arcana.Pipeline.GroundTest do
 
     test "accepts custom grounder module" do
       defmodule TestGrounder do
-        @behaviour Arcana.Pipeline.Grounder
+        @behaviour Arcana.Grounder
 
-        @impl Arcana.Pipeline.Grounder
+        @impl Arcana.Grounder
         def ground(_answer, _chunks, _opts) do
           {:ok, %Result{score: 1.0, hallucinated_spans: [], token_labels: []}}
         end
@@ -163,7 +163,7 @@ defmodule Arcana.Pipeline.GroundTest do
 
       :telemetry.attach(
         ref,
-        [:arcana, :agent, :ground, :stop],
+        [:arcana, :pipeline, :ground, :stop],
         fn event, measurements, metadata, _ ->
           send(test_pid, {:telemetry, event, measurements, metadata})
         end,
@@ -186,7 +186,7 @@ defmodule Arcana.Pipeline.GroundTest do
       }
       |> Pipeline.ground(grounder: grounder)
 
-      assert_receive {:telemetry, [:arcana, :agent, :ground, :stop], _, stop_meta}
+      assert_receive {:telemetry, [:arcana, :pipeline, :ground, :stop], _, stop_meta}
       assert stop_meta.score == 0.9
       assert stop_meta.hallucinated_span_count == 1
       assert stop_meta.faithful_span_count == 0

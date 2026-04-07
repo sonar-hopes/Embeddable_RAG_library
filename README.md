@@ -2,561 +2,105 @@
 
 [![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fgeorgeguimaraes%2Farcana%2Fblob%2Fmain%2Flivebooks%2Farcana_tutorial.livemd)
 
-Embeddable RAG library for Elixir/Phoenix. Add vector search, document retrieval, and AI-powered question answering to any Phoenix application. Supports both simple RAG and agentic RAG with query expansion, self-correction, and more.
+An embeddable RAG library for Elixir and Phoenix. Arcana lets you add vector search, knowledge graphs, and LLM-driven retrieval to any app that already has an Ecto repo, without standing up a separate vector database, indexing service, or orchestration layer.
 
 > [!TIP]
-> See [arcana-adept](https://github.com/georgeguimaraes/arcana-adept) for a complete Phoenix app with a Doctor Who corpus ready to embed and query.
+> See [arcana-adept](https://github.com/georgeguimaraes/arcana-adept) for a complete Phoenix app with the Doctor Who corpus pre-ingested and ready to query.
 
-## Features
+## Why this exists
 
-- **Simple API** - `ingest/2`, `search/2`, `ask/2` for basic RAG
-- **Agentic RAG** - Pipeline with query expansion, decomposition, re-ranking, and self-correction
-- **Pluggable components** - Replace any pipeline step with custom implementations
-- **Hybrid search** - Vector, full-text, or combined with Reciprocal Rank Fusion
-- **GraphRAG** - Optional knowledge graph with entity extraction, community detection, and fusion search
-- **Multiple backends** - Swappable vector store (pgvector, in-memory HNSWLib) and graph store (Ecto, in-memory) backends
-- **Configurable embeddings** - Local Bumblebee, OpenAI, or custom providers
-- **File ingestion** - Text, Markdown, and PDF support
-- **Evaluation** - Measure retrieval quality with MRR, Recall, Precision metrics
-- **Embeddable** - Uses your existing Repo, no separate database
-- **LiveView Dashboard** - Optional web UI for managing documents and searching
-- **Telemetry** - Built-in observability for all operations
+Most RAG libraries are written in Python and assume you'll bolt them onto your stack via HTTP. That works, but it leaves you running a vector DB you don't otherwise need, juggling two languages, and gluing telemetry together across processes. The BEAM is particularly well-suited to RAG: pgvector is excellent, supervision trees are the right shape for long-running embedders and rerankers, telemetry is built into the platform, and your Phoenix app already has the Repo, the LiveView for the dashboard, and the user session for chat.
 
-## How it works
+Arcana takes that observation seriously. Everything lives inside your app:
 
-### Basic RAG Pipeline
+- **One Repo.** Documents, chunks, embeddings, and the knowledge graph are tables in your existing Postgres database. No new infrastructure.
+- **Local-first by default.** Embeddings run on Bumblebee with EXLA, EMLX (Apple Silicon), or Torchx. The cross-encoder reranker is also local. You can swap to OpenAI/Cohere/whatever, but you don't have to.
+- **One process model.** Embedders and rerankers are `Nx.Serving` instances under your supervision tree. Telemetry events are `:telemetry` spans you can already consume. There is no separate "RAG service" to operate.
+- **Pluggable, but not abstract.** Every step that can be replaced is a behaviour with a single callback and a sensible default. Custom rerankers, custom searchers, custom answerers — they're all 10-line modules.
 
-1. **Chunk**: Text is split into overlapping segments (default 450 tokens, 50 overlap). Pluggable chunkers support custom splitting logic.
-2. **Embed**: Each chunk is embedded using configurable providers (local Bumblebee, OpenAI, or custom). E5 models automatically get `query:`/`passage:` prefixes.
-3. **Store**: Embeddings are stored via swappable vector backends (pgvector for production, HNSWLib in-memory for testing).
-4. **Search**: Query embedding is compared using cosine similarity. Supports semantic, full-text, and hybrid modes with Reciprocal Rank Fusion.
+## Three modes of operation
 
-### GraphRAG (Optional)
+Singh et al.'s 2025 [Agentic RAG survey](https://arxiv.org/abs/2501.09136) splits RAG systems into four progressively more flexible patterns. The key axis is **who decides the control flow**:
 
-When `graph: true` is enabled:
-1. **Extract**: Named entities (people, orgs, technologies) are extracted via NER or LLM
-2. **Link**: Relationships between entities are detected and stored
-3. **Community**: Entities are clustered using the Leiden algorithm
-4. **Fuse**: Vector search and graph traversal results are combined with RRF
+| Pattern | Flow decided by | What it looks like |
+|---|---|---|
+| **Naive RAG** | nobody, there is none | embed → retrieve → generate, one shot |
+| **Advanced RAG** | author, at code time | naive + query rewriting, reranking, fusion |
+| **Modular RAG** | author, at code time | composable pluggable steps you wire together |
+| **Agentic RAG** | the LLM, at runtime | LLM picks tools each turn until it can answer |
 
-### Agentic Pipeline
+Arcana ships three usage shapes that map onto the last three slots:
 
-For complex questions, the Pipeline provides:
-- **Retrieval gating** - decides if retrieval is needed or can answer from knowledge
-- **Query expansion** - adds synonyms and related terms
-- **Decomposition** - splits multi-part questions
-- **Multi-hop reasoning** - evaluates results and searches again if needed
-- **Re-ranking** - scores chunk relevance (0-10)
+| Arcana surface | Singh slot | When to reach for it |
+|---|---|---|
+| `Arcana.search/2`, `Arcana.ask/2` | Advanced RAG | The default door. One call, sensible defaults: query rewriting, hybrid search, optional graph fusion, cross-encoder reranking. Use this unless you need more control. |
+| `Arcana.Pipeline.*` | Modular RAG | Compose your own steps when you need control over order or behavior: `gate → rewrite → expand → decompose → search → reason → rerank → answer → ground`. Each step is a behaviour you can replace. |
+| `Arcana.Loop.*` | Agentic RAG | Hand the wheel to the LLM. It picks tools (`search`, `answer`, `give_up`) each turn. Best for open-ended or multi-hop questions where the right sequence of searches isn't obvious upfront. |
 
-## Installation
+Arcana intentionally does not ship a "Naive RAG" mode. Even the simplest entry point already does query rewriting, reranking, and graph fusion when available.
 
-**With Igniter (recommended):**
+## How it feels
 
-```bash
-mix igniter.install arcana
-mix ecto.migrate
-```
-
-This adds the dependency, creates migrations, configures your repo, and sets up the dashboard route.
-
-**Without Igniter:**
-
-Add `arcana` to your dependencies:
+The shortest useful program:
 
 ```elixir
-def deps do
-  [
-    {:arcana, "~> 1.0"}
-  ]
-end
+{:ok, _doc} = Arcana.ingest("Phoenix LiveView is a server-rendered UI library...", repo: MyApp.Repo)
+
+{:ok, answer} = Arcana.ask("What is Phoenix LiveView?", repo: MyApp.Repo, llm: "openai:gpt-4o-mini")
 ```
 
-Then run:
-
-```bash
-mix deps.get
-mix arcana.install
-mix ecto.migrate
-```
-
-And follow the manual steps printed by the installer:
-
-1. Create the Postgrex types module:
-
-```elixir
-# lib/my_app/postgrex_types.ex
-Postgrex.Types.define(
-  MyApp.PostgrexTypes,
-  [Pgvector.Extensions.Vector] ++ Ecto.Adapters.Postgres.extensions(),
-  []
-)
-```
-
-2. Add to your repo config:
-
-```elixir
-# config/config.exs
-config :my_app, MyApp.Repo,
-  types: MyApp.PostgrexTypes
-```
-
-3. (Optional) Mount the dashboard:
-
-```elixir
-# lib/my_app_web/router.ex
-scope "/arcana" do
-  pipe_through [:browser]
-  forward "/", ArcanaWeb.Router
-end
-```
-
-## Setup
-
-### Start PostgreSQL with pgvector
-
-```yaml
-# docker-compose.yml
-services:
-  postgres:
-    image: pgvector/pgvector:pg16
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: myapp_dev
-```
-
-### Add to supervision tree
-
-Add Arcana components to your supervision tree:
-
-```elixir
-# lib/my_app/application.ex
-def start(_type, _args) do
-  children = [
-    MyApp.Repo,
-    Arcana.TaskSupervisor,  # Required for dashboard async operations
-    Arcana.Embedder.Local   # Only if using local Bumblebee embeddings
-  ]
-
-  opts = [strategy: :one_for_one, name: MyApp.Supervisor]
-  Supervisor.start_link(children, opts)
-end
-```
-
-`Arcana.TaskSupervisor` is required for the dashboard's async operations (Ask, Maintenance).
-`Arcana.Embedder.Local` is only needed if using local Bumblebee embeddings (the default).
-
-### Configure Nx backend (required for local embeddings)
-
-For local embeddings, you need an Nx backend. Choose **one** of the following:
-
-```elixir
-# config/config.exs
-
-# Option 1: EXLA - Google's XLA compiler (Linux/macOS/Windows)
-config :nx,
-  default_backend: EXLA.Backend,
-  default_defn_options: [compiler: EXLA]
-
-# Option 2: EMLX - Apple's MLX framework (macOS with Apple Silicon only)
-config :nx,
-  default_backend: EMLX.Backend,
-  default_defn_options: [compiler: EMLX]
-
-# Option 3: Torchx - PyTorch backend (no compiler, uses eager execution)
-config :nx,
-  default_backend: {Torchx.Backend, device: :cpu}  # or :mps for Apple Silicon
-```
-
-Add the corresponding dependency to your `mix.exs`:
-
-```elixir
-{:exla, "~> 0.9"}    # or
-{:emlx, "~> 0.1"}    # or
-{:torchx, "~> 0.9"}
-```
-
-### Embedding providers
-
-Arcana supports multiple embedding providers:
-
-```elixir
-# config/config.exs
-
-# Local Bumblebee (default) - no API keys needed
-config :arcana, embedder: :local
-config :arcana, embedder: {:local, model: "BAAI/bge-large-en-v1.5"}
-
-# E5 models (automatically adds query:/passage: prefixes)
-config :arcana, embedder: {:local, model: "intfloat/e5-small-v2"}
-
-# OpenAI (requires OPENAI_API_KEY)
-config :arcana, embedder: :openai
-config :arcana, embedder: {:openai, model: "text-embedding-3-large"}
-
-# Custom module implementing Arcana.Embedder behaviour
-config :arcana, embedder: MyApp.CohereEmbedder
-```
-
-Implement custom embedders with the `Arcana.Embedder` behaviour:
-
-```elixir
-defmodule MyApp.CohereEmbedder do
-  @behaviour Arcana.Embedder
-
-  @impl true
-  def embed(text, opts) do
-    # Call your embedding API
-    {:ok, embedding_vector}
-  end
-
-  @impl true
-  def dimensions(_opts), do: 1024
-end
-```
-
-See the [Getting Started Guide](guides/getting-started.md) for all embedding model options.
-
-### Chunking providers
-
-Arcana supports pluggable chunking strategies:
-
-```elixir
-# config/config.exs
-
-# Default text chunker (uses text_chunker library)
-config :arcana, chunker: :default
-config :arcana, chunker: {:default, chunk_size: 512, chunk_overlap: 100}
-
-# Custom module implementing Arcana.Chunker behaviour
-config :arcana, chunker: MyApp.SemanticChunker
-```
-
-Implement custom chunkers with the `Arcana.Chunker` behaviour:
-
-```elixir
-defmodule MyApp.SemanticChunker do
-  @behaviour Arcana.Chunker
-
-  @impl true
-  def chunk(text, opts) do
-    # Custom chunking logic (e.g., semantic boundaries)
-    [
-      %{text: "chunk 1", chunk_index: 0, token_count: 50},
-      %{text: "chunk 2", chunk_index: 1, token_count: 45}
-    ]
-  end
-end
-```
-
-You can also pass `:chunker` directly to `ingest/2`:
-
-```elixir
-Arcana.ingest(text, repo: MyApp.Repo, chunker: MyApp.SemanticChunker)
-```
-
-### PDF parsing
-
-Arcana supports PDF ingestion with pluggable parsers. The default uses Poppler's `pdftotext`:
-
-```elixir
-# config/config.exs
-
-# Default: Poppler (requires pdftotext installed)
-config :arcana, pdf_parser: :poppler
-config :arcana, pdf_parser: {:poppler, layout: true}
-
-# Custom module implementing Arcana.FileParser.PDF behaviour
-config :arcana, pdf_parser: MyApp.PDFParser
-config :arcana, pdf_parser: {MyApp.PDFParser, some_option: "value"}
-```
-
-**Installing Poppler:**
-
-```bash
-# macOS
-brew install poppler
-
-# Ubuntu/Debian
-apt-get install poppler-utils
-
-# Fedora
-dnf install poppler-utils
-```
-
-**Custom PDF parsers** implement the `Arcana.FileParser.PDF` behaviour:
-
-```elixir
-defmodule MyApp.PDFParser do
-  @behaviour Arcana.FileParser.PDF
-
-  @impl true
-  def parse(path, opts) do
-    # Your PDF parsing logic (e.g., using pdf2htmlex, Apache PDFBox, etc.)
-    {:ok, extracted_text}
-  end
-
-  # Optional: support binary content (default: false)
-  def supports_binary?, do: true
-end
-```
-
-### LLM configuration
-
-Configure the LLM for `ask/2` and the Pipeline:
-
-```elixir
-# config/config.exs
-
-# Model string (requires req_llm dependency)
-config :arcana, llm: "openai:gpt-4o-mini"
-config :arcana, llm: "anthropic:claude-sonnet-4-20250514"
-
-# Function that takes a prompt and returns {:ok, response}
-config :arcana, llm: fn prompt ->
-  {:ok, MyApp.LLM.complete(prompt)}
-end
-
-# Custom module implementing Arcana.LLM behaviour
-config :arcana, llm: MyApp.CustomLLM
-```
-
-You can also pass `:llm` directly to functions:
-
-```elixir
-Arcana.ask("What is Elixir?", repo: MyApp.Repo, llm: "openai:gpt-4o")
-
-Pipeline.new(question, repo: MyApp.Repo, llm: fn prompt -> ... end)
-```
-
-See the [LLM Integration Guide](guides/llm-integration.md) for detailed examples.
-
-## Usage
-
-### Ingest documents
-
-```elixir
-# Basic ingestion
-{:ok, document} = Arcana.ingest("Your document content here", repo: MyApp.Repo)
-
-# With metadata and collection
-{:ok, document} = Arcana.ingest(content,
-  repo: MyApp.Repo,
-  metadata: %{"title" => "My Doc", "author" => "Jane"},
-  collection: "products"
-)
-
-# Ingest from file (supports .txt, .md, .pdf)
-{:ok, document} = Arcana.ingest_file("path/to/document.pdf", repo: MyApp.Repo)
-
-# With GraphRAG (extracts entities and relationships)
-{:ok, document} = Arcana.ingest(content, repo: MyApp.Repo, graph: true)
-```
-
-### Search
-
-```elixir
-# Semantic search (default)
-{:ok, results} = Arcana.search("your query", repo: MyApp.Repo)
-
-# Hybrid search (combines semantic + fulltext)
-{:ok, results} = Arcana.search("query", repo: MyApp.Repo, mode: :hybrid)
-
-# Hybrid with custom weights (pgvector only)
-{:ok, results} = Arcana.search("query",
-  repo: MyApp.Repo,
-  mode: :hybrid,
-  semantic_weight: 0.7,
-  fulltext_weight: 0.3
-)
-
-# With filters
-{:ok, results} = Arcana.search("query",
-  repo: MyApp.Repo,
-  limit: 5,
-  collection: "products"
-)
-
-# With GraphRAG (combines vector + graph search with RRF)
-{:ok, results} = Arcana.search("query", repo: MyApp.Repo, graph: true)
-```
-
-See the [Search Algorithms Guide](guides/search-algorithms.md) for details on search modes.
-
-### GraphRAG
-
-GraphRAG enhances retrieval by building a knowledge graph from your documents. Entities (people, organizations, technologies) and their relationships are extracted during ingestion, then used alongside vector search for more contextual results.
-
-```elixir
-# Install GraphRAG tables
-mix arcana.graph.install
-mix ecto.migrate
-
-# Ingest with graph building
-{:ok, document} = Arcana.ingest(content, repo: MyApp.Repo, graph: true)
-
-# Search combines vector + graph traversal with Reciprocal Rank Fusion
-{:ok, results} = Arcana.search("Who leads OpenAI?", repo: MyApp.Repo, graph: true)
-```
-
-Components are pluggable: swap entity extractors (NER, LLM), relationship extractors, community detectors (Leiden), and summarizers with your own implementations.
-
-See the [GraphRAG Guide](guides/graphrag.md) for entity extraction, community detection, and fusion search.
-
-### Ask (Simple RAG)
-
-```elixir
-{:ok, answer} = Arcana.ask("What is Elixir?",
-  repo: MyApp.Repo,
-  llm: "openai:gpt-4o-mini"
-)
-```
-
-### Agentic RAG
-
-For complex questions, use the Pipeline with retrieval gating, query expansion, multi-hop reasoning, and re-ranking:
+When that's not enough, drop down to the Pipeline:
 
 ```elixir
 alias Arcana.Pipeline
 
-llm = fn prompt -> {:ok, "LLM response"} end
-
 ctx =
-  Pipeline.new("Compare Elixir and Erlang features", repo: MyApp.Repo, llm: llm)
-  |> Pipeline.gate()                                   # Skip retrieval if not needed
-  |> Pipeline.select(collections: ["elixir-docs", "erlang-docs"])
-  |> Pipeline.expand()
-  |> Pipeline.search()
-  |> Pipeline.reason()                                 # Search again if results insufficient
-  |> Pipeline.rerank()
+  Pipeline.new("Compare Elixir and Erlang for building web services",
+    repo: MyApp.Repo,
+    llm: llm
+  )
+  |> Pipeline.rewrite()                                  # clean up conversational input
+  |> Pipeline.select(collections: ["elixir", "erlang"])  # let the LLM pick collections
+  |> Pipeline.decompose()                                # split into sub-questions
+  |> Pipeline.search()                                   # search each one
+  |> Pipeline.rerank()                                   # cross-encoder rerank
   |> Pipeline.answer()
+  |> Pipeline.ground()                                   # NLI hallucination check
 
 ctx.answer
-# => "Generated answer based on retrieved context..."
+ctx.grounding.score
 ```
 
-#### Pipeline Steps
-
-| Step | What it does |
-|------|--------------|
-| `new/2` | Initialize context with question, repo, and LLM function |
-| `gate/2` | Decide if retrieval is needed; sets `skip_retrieval: true` if answerable from knowledge |
-| `rewrite/2` | Clean up conversational input ("Hey, can you tell me about X?" → "about X") |
-| `select/2` | Choose which collections to search (LLM picks based on collection descriptions) |
-| `expand/2` | Add synonyms and related terms ("ML models" → "ML machine learning models algorithms") |
-| `decompose/2` | Split complex questions ("What is X and how does Y work?" → ["What is X?", "How does Y work?"]) |
-| `search/2` | Execute vector search (skipped if `skip_retrieval: true`) |
-| `reason/2` | Multi-hop reasoning; evaluates if results are sufficient and searches again if needed |
-| `rerank/2` | Score each chunk's relevance (0-10) and filter below threshold |
-| `answer/2` | Generate final answer using retrieved context (or from knowledge if `skip_retrieval: true`) |
-| `ground/2` | Detect hallucinations in the answer using [Hallmark](https://github.com/georgeguimaraes/hallmark) (sentence-level NLI scoring) |
-
-#### Example: Building a Pipeline
+When the right sequence of searches isn't knowable upfront, hand control to the LLM:
 
 ```elixir
-# Simple pipeline - just search and answer
-ctx =
-  Pipeline.new(question, repo: MyApp.Repo, llm: llm)
-  |> Pipeline.search(collection: "docs")
-  |> Pipeline.answer()
+{:ok, ctx} =
+  Arcana.Loop.new("Find episodes where a Time Lord betrayed the Doctor",
+    repo: MyApp.Repo,
+    collection: "doctor-who"
+  )
+  |> Arcana.Loop.run(controller_llm: "openai:gpt-4o-mini")
 
-# Full pipeline with all steps
-ctx =
-  Pipeline.new(question, repo: MyApp.Repo, llm: llm)
-  |> Pipeline.gate()                                 # Decide if retrieval needed
-  |> Pipeline.rewrite()                              # Clean up conversational input
-  |> Pipeline.select(collections: available_collections)  # Pick relevant collections
-  |> Pipeline.expand()                               # Add synonyms
-  |> Pipeline.decompose()                            # Split multi-part questions
-  |> Pipeline.search()                               # Search each sub-question
-  |> Pipeline.reason()                               # Multi-hop: search again if needed
-  |> Pipeline.rerank(threshold: 7)                   # Keep chunks scoring 7+/10
-  |> Pipeline.answer()                               # Generate answer
+ctx = Arcana.Loop.ground(ctx)  # optional: faithfulness scoring
 
-# Access results
-ctx.answer           # Final answer
-ctx.skip_retrieval   # true if gate/2 determined no retrieval needed
-ctx.sub_questions    # Sub-questions from decomposition
-ctx.reason_iterations # Number of additional searches by reason/2
+ctx.answer
+ctx.tool_history         # which tools the LLM picked, in order
+ctx.terminated_by        # :answered, :gave_up, :max_iterations, or :error
+ctx.grounding.score      # 0.0-1.0 if you called ground/2
 ```
 
-#### Custom Components
-
-Every pipeline step can be replaced with a custom module or function:
+Loop also supports the standard router/answerer split: a cheap fast model picks tools each turn, and a stronger model writes the user-facing answer.
 
 ```elixir
-# Custom reranker using a cross-encoder model
-defmodule MyApp.CrossEncoderReranker do
-  @behaviour Arcana.Pipeline.Reranker
-
-  @impl true
-  def rerank(question, chunks, _opts) do
-    scored = Enum.map(chunks, fn chunk ->
-      score = MyApp.CrossEncoder.score(question, chunk.text)
-      {chunk, score}
-    end)
-    |> Enum.filter(fn {_, score} -> score > 0.5 end)
-    |> Enum.sort_by(fn {_, score} -> score end, :desc)
-    |> Enum.map(fn {chunk, _} -> chunk end)
-
-    {:ok, scored}
-  end
-end
-
-ctx |> Pipeline.rerank(reranker: MyApp.CrossEncoderReranker)
-
-# Or use an inline function
-ctx |> Pipeline.rerank(reranker: fn question, chunks, _opts ->
-  {:ok, Enum.filter(chunks, &relevant?(&1, question))}
-end)
+Arcana.Loop.run(ctx,
+  controller_llm: "zai:glm-4.5-flash",  # cheap, fast: picks tools
+  answer_llm:     "zai:glm-4.6"         # stronger: writes the final answer
+)
 ```
 
-All steps support custom implementations via behaviours:
+The controller drives the loop iterations, and when it commits via the `answer` tool, the answerer takes over and produces the final user-visible text from the same accumulated context. The same answerer is also used by the synthesis fallback when the loop runs out of budget without committing.
 
-| Step | Behaviour | Option |
-|------|-----------|--------|
-| `rewrite/2` | `Arcana.Pipeline.Rewriter` | `:rewriter` |
-| `select/2` | `Arcana.Pipeline.Selector` | `:selector` |
-| `expand/2` | `Arcana.Pipeline.Expander` | `:expander` |
-| `decompose/2` | `Arcana.Pipeline.Decomposer` | `:decomposer` |
-| `search/2` | `Arcana.Pipeline.Searcher` | `:searcher` |
-| `rerank/2` | `Arcana.Pipeline.Reranker` | `:reranker` |
-| `answer/2` | `Arcana.Pipeline.Answerer` | `:answerer` |
-| `ground/2` | `Arcana.Pipeline.Grounder` | `:grounder` |
-
-See the [Agentic RAG Guide](guides/agentic-rag.md) for detailed examples.
-
-#### Grounding (Hallucination Detection)
-
-The `ground/2` step detects hallucinations in the generated answer by scoring each sentence against the retrieved context using NLI (natural language inference). It uses [Hallmark](https://github.com/georgeguimaraes/hallmark), which runs Vectara's HHEM model natively via Bumblebee.
-
-```elixir
-ctx =
-  Pipeline.new(question, repo: MyApp.Repo, llm: llm)
-  |> Pipeline.search()
-  |> Pipeline.answer()
-  |> Pipeline.ground()
-
-ctx.grounding.score              # 0.0-1.0 (weighted average consistency score)
-ctx.grounding.hallucinated_spans # [%{text: "...", start: 0, end: 42, score: 0.95}]
-```
-
-Setup just requires the `hallmark` dependency. The model (~440 MB) downloads automatically on first use:
-
-```elixir
-# Add to mix.exs
-{:hallmark, "~> 1.0"}
-```
-
-You can also use a custom grounder:
-
-```elixir
-ctx |> Pipeline.ground(grounder: fn answer, chunks, opts ->
-  {:ok, %Arcana.Grounding.Result{score: 1.0, hallucinated_spans: []}}
-end)
-```
+Each surface is a thin layer over the same primitives: chunkers, embedders, vector stores, graph stores, rerankers. You can mix and match — `Arcana.search/2` and `Arcana.Loop` both call into `Arcana.Searcher`, so a custom searcher you write for one is a custom searcher for all of them.
 
 ## Architecture
 
@@ -564,33 +108,90 @@ end)
 ┌──────────────────────────────────────────────────────────────────────┐
 │                           Your Phoenix App                           │
 ├──────────────────────────────────────────────────────────────────────┤
-│                             Arcana.Pipeline                             │
-│  (rewrite → select → expand → search → rerank → answer → ground)     │
-├──────────────────────────────────────────────────────────────────────┤
-│  Arcana.ask/2        │  Arcana.search/2       │  Arcana.ingest/2     │
-├──────────────────────┴────────────────────────┴──────────────────────┤
-│                                                                      │
-│  ┌──────────┐   ┌────────────┐   ┌──────────┐   ┌────────────────┐   │
-│  │ Chunker  │   │ Embeddings │   │  Search  │   │   Grounding    │   │
-│  └──────────┘   └────────────┘   └──────────┘   └────────────────┘   │
-│                                                                      │
-├──────────────────────────────────────────────────────────────────────┤
-│                       Your Existing Ecto Repo                        │
-│                   PostgreSQL + pgvector extension                    │
-└──────────────────────────────────────────────────────────────────────┘
+│   Arcana.search/2   │   Arcana.ask/2   │   Arcana.Pipeline.*   │  Arcana.Loop.*   │
+├─────────────────────┴──────────────────┴───────────────────────┴──────────────────┤
+│                                                                                   │
+│  ┌──────────┐  ┌────────────┐  ┌──────────┐  ┌──────────┐  ┌────────────────┐    │
+│  │ Chunker  │  │  Embedder  │  │  Search  │  │ Reranker │  │   Grounding    │    │
+│  └──────────┘  └────────────┘  └──────────┘  └──────────┘  └────────────────┘    │
+│                                                                                   │
+│  ┌──────────────────────────────────────────────────────────────────────────┐    │
+│  │                              Knowledge Graph                              │    │
+│  │   entity extraction → relationship linking → community detection (Leiden) │    │
+│  └──────────────────────────────────────────────────────────────────────────┘    │
+│                                                                                   │
+├──────────────────────────────────────────────────────────────────────────────────┤
+│                       Your Existing Ecto Repo                                    │
+│                   PostgreSQL + pgvector extension                                │
+└──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Guides
+Everything between the top row (the four user-facing surfaces) and the Repo is pluggable. Default implementations cover the common case; behaviours let you swap any single piece without touching the rest.
 
-- [Getting Started](guides/getting-started.md) - Installation, embedding models, basic usage
-- [Agentic RAG](guides/agentic-rag.md) - Build sophisticated RAG pipelines
-- [GraphRAG](guides/graphrag.md) - Knowledge graphs with entity extraction and community detection
-- [LLM Integration](guides/llm-integration.md) - Connect to OpenAI, Anthropic, or custom LLMs
-- [Search Algorithms](guides/search-algorithms.md) - Semantic, fulltext, and hybrid search
-- [Re-ranking](guides/reranking.md) - Improve retrieval quality
-- [Evaluation](guides/evaluation.md) - Measure and improve retrieval quality
-- [Telemetry](guides/telemetry.md) - Observability, metrics, and debugging
-- [Dashboard](guides/dashboard.md) - Web UI setup
+## Installation
+
+With [Igniter](https://hexdocs.pm/igniter):
+
+```bash
+mix igniter.install arcana
+mix ecto.migrate
+```
+
+This adds the dependency, creates migrations, configures your Repo, and mounts the dashboard route.
+
+For manual installation, supervision setup, embedder configuration, and the rest of the moving parts, see the [Getting Started guide](guides/getting-started.md).
+
+## Documentation
+
+The README is the brochure. The guides are the manual.
+
+- [Getting Started](guides/getting-started.md) — installation, supervision tree, embedder and chunker setup, first ingestion, first query
+- [LLM Integration](guides/llm-integration.md) — configuring providers (OpenAI, Anthropic, Z.ai, custom), passing per-call LLMs, model strings vs functions
+- [Pipeline (Modular RAG)](guides/pipeline.md) — `Arcana.Pipeline`, every step in detail, custom behaviours, telemetry per step
+- [Loop (Agentic RAG)](guides/loop.md) — `Arcana.Loop`, the default toolset, controller models, the system prompt, fallback synthesis
+- [Search Algorithms](guides/search-algorithms.md) — semantic, fulltext, hybrid, RRF fusion, hybrid weights
+- [Reranking](guides/reranking.md) — cross-encoder, ColBERT, LLM-based rerankers, when each is appropriate
+- [GraphRAG](guides/graphrag.md) — entity extraction, community detection (Leiden), graph search, fusion with vector
+- [Evaluation](guides/evaluation.md) — synthetic test sets, MRR / Recall / Hit metrics, evaluation runs
+- [Telemetry](guides/telemetry.md) — every event Arcana emits, attaching handlers, hooking into Phoenix LiveDashboard
+- [Dashboard](guides/dashboard.md) — the LiveView UI, mounting it, what it shows
+
+## References
+
+Arcana's design borrows heavily from published work. The implementation choices map back to specific papers wherever possible:
+
+### RAG architecture and the agentic taxonomy
+
+- [Agentic Retrieval-Augmented Generation: A Survey](https://arxiv.org/abs/2501.09136) (Singh et al., 2025) — the four-level taxonomy (Naive / Advanced / Modular / Agentic) that Arcana's three surfaces map onto
+- [Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection](https://arxiv.org/abs/2310.11511) (Asai et al., ICLR 2024) — inspires `Pipeline.gate/2` and `Pipeline.ground/2`
+- [Corrective Retrieval Augmented Generation (CRAG)](https://arxiv.org/abs/2401.15884) (Yan et al., 2024) — inspires the `self_correct: true` modes on `Pipeline.search/2` and `Pipeline.answer/2`
+
+### Retrieval
+
+- [Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods](https://dl.acm.org/doi/10.1145/1571941.1572114) (Cormack et al., SIGIR 2009) — RRF is the fusion algorithm Arcana uses to combine vector and full-text (and graph) results
+- [Lost in the Middle: How Language Models Use Long Contexts](https://arxiv.org/abs/2307.03172) (Liu et al., 2023) — informs context ordering and the chunk count we ship as the default
+- [Precise Zero-Shot Dense Retrieval without Relevance Labels (HyDE)](https://arxiv.org/abs/2212.10496) (Gao et al., 2022) — hypothetical document embeddings (planned, not yet shipped)
+
+### GraphRAG
+
+- [From Local to Global: A Graph RAG Approach to Query-Focused Summarization](https://arxiv.org/abs/2404.16130) (Microsoft, 2024) — the community-summary-based local search pattern Arcana implements
+- [Graph Retrieval-Augmented Generation: A Survey](https://arxiv.org/abs/2408.08921) (2024) — comprehensive survey
+- [HopRAG: Multi-Hop Reasoning for Knowledge-Aware RAG](https://arxiv.org/abs/2502.12442) (ACL 2025) — LLM-guided graph traversal
+
+### Reranking
+
+- Cross-encoder reranking via Bumblebee — `cross-encoder/ms-marco-MiniLM-L-6-v2` is the default. Cross-encoders consistently improve top-k accuracy by 10-25% over bi-encoder retrieval alone, and that held up in our doctor-who eval (MRR +39%, Hit@1 +62%).
+
+### Agent prompting (informs `Arcana.Loop`)
+
+- [Anthropic: Writing tools for agents](https://www.anthropic.com/engineering/writing-tools-for-agents) — heavy detail in tool descriptions, tell the model when NOT to call tools
+- [Anthropic: Effective context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) — high-signal summaries from tools rather than raw chunk dumps
+- [OpenAI: GPT-5 prompting guide](https://developers.openai.com/cookbook/examples/gpt-5/gpt-5_prompting_guide) — soft language instead of `MUST`/`CRITICAL`, tool budget in the prompt alongside hard caps
+
+### Evaluation and grounding
+
+- [RAGAS: Automated Evaluation of Retrieval Augmented Generation](https://arxiv.org/abs/2309.15217) (Shahul et al., 2023) — faithfulness, relevance, context metrics
+- [LettuceDetect: A Hallucination Detector for RAG](https://arxiv.org/abs/2502.17125) (2025) — token-level grounding, an alternative to the NLI scoring `Pipeline.ground/2` does today
 
 ## Roadmap
 
@@ -599,77 +200,24 @@ end)
 - [x] File ingestion (text, markdown, PDF)
 - [x] Telemetry events for observability
 - [x] In-memory vector store (HNSWLib backend)
-- [x] Query expansion (Pipeline.expand/2)
-- [x] Re-ranking (Pipeline.rerank/2)
-- [x] Agentic RAG
-  - [x] Pipeline with context struct
-  - [x] Self-correcting answers (evaluate + refine)
-  - [x] Question decomposition (multi-step)
-  - [x] Collection selection
-  - [x] Pluggable components (custom behaviours for all steps)
-- [x] E5 embedding model prefix support (`query:` / `passage:` prefixes)
-- [ ] Additional vector store backends
-  - [ ] TurboPuffer (hybrid search)
-  - [ ] ChromaDB
-- [ ] Async ingestion with Oban
+- [x] Modular pipeline (`Arcana.Pipeline`) with pluggable behaviours for every step
+- [x] Cross-encoder reranking (local, via Bumblebee)
+- [x] GraphRAG (entity extraction, community summaries, fusion)
+- [x] Agentic loop (`Arcana.Loop`) with native tool calling and fallback synthesis
+- [x] E5 embedding model prefix support
 - [ ] HyDE (Hypothetical Document Embeddings)
-- [x] GraphRAG (knowledge graph + community summaries)
-
-## References
-
-Papers and research that inform Arcana's design:
-
-### Retrieval
-
-- [Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods](https://dl.acm.org/doi/10.1145/1571941.1572114) (Cormack et al., SIGIR 2009) — RRF for combining vector and fulltext search
-- [Lost in the Middle: How Language Models Use Long Contexts](https://arxiv.org/abs/2307.03172) (Liu et al., 2023) — informs context ordering and chunk count
-- [Precise Zero-Shot Dense Retrieval without Relevance Labels (HyDE)](https://arxiv.org/abs/2212.10496) (Gao et al., 2022) — hypothetical document embeddings
-
-### GraphRAG
-
-- [From Local to Global: A Graph RAG Approach to Query-Focused Summarization](https://arxiv.org/abs/2404.16130) (Microsoft, 2024) — community summaries and Local Search
-- [Graph Retrieval-Augmented Generation: A Survey](https://arxiv.org/abs/2408.08921) (2024) — comprehensive survey of Graph RAG approaches
-- [HopRAG: Multi-Hop Reasoning for Knowledge-Aware RAG](https://arxiv.org/abs/2502.12442) (ACL 2025) — LLM-guided graph traversal
-
-### Reranking
-
-- Cross-encoder reranking via Bumblebee — uses [`cross-encoder/ms-marco-MiniLM-L-6-v2`](https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-6-v2) by default. Cross-encoders consistently improve top-k accuracy by 10-25% over bi-encoder retrieval alone.
-
-### Agentic RAG
-
-`Arcana.Pipeline` is a composed pipeline (not a fully autonomous loop). The "agentic" parts live inside specific steps: `gate/2`, `search(self_correct: true)`, `reason/2`, and `answer(self_correct: true)`. This matches the Modular and Corrective patterns in the survey below.
-
-- [Agentic Retrieval-Augmented Generation: A Survey](https://arxiv.org/abs/2501.09136) (Singh et al., 2025) — taxonomy of agentic RAG patterns
-- [Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection](https://arxiv.org/abs/2310.11511) (Asai et al., ICLR 2024) — inspires `gate/2` and `ground/2`
-- [Corrective Retrieval Augmented Generation (CRAG)](https://arxiv.org/abs/2401.15884) (Yan et al., 2024) — inspires `search(self_correct: true)` and `answer(self_correct: true)`
-- [What Is Agentic RAG?](https://weaviate.io/blog/what-is-agentic-rag) (Weaviate, 2024) — vendor-neutral overview
-
-### Evaluation
-
-- [RAGAS: Automated Evaluation of Retrieval Augmented Generation](https://arxiv.org/abs/2309.15217) (Shahul et al., 2023) — faithfulness, relevance, and context metrics
-- [LettuceDetect: A Hallucination Detector for RAG](https://arxiv.org/abs/2502.17125) (2025) — token-level grounding for faithfulness checking
+- [ ] Async ingestion via Oban
+- [ ] Additional vector backends (TurboPuffer, ChromaDB)
 
 ## Development
 
 ```bash
-# Start PostgreSQL
-docker compose up -d
-
-# Install deps
+docker compose up -d        # Postgres + pgvector
 mix deps.get
-
-# Create and migrate test database
-MIX_ENV=test mix ecto.create -r Arcana.TestRepo
-MIX_ENV=test mix ecto.migrate -r Arcana.TestRepo
-
-# Run tests
+MIX_ENV=test mix ecto.create && MIX_ENV=test mix ecto.migrate
 mix test
 ```
 
----
-
 ## License
 
-Copyright (c) 2025 George Guimarães
-
-Licensed under the Apache License, Version 2.0. See LICENSE file for details.
+Apache-2.0

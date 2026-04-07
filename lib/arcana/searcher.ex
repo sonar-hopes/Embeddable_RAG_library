@@ -1,18 +1,18 @@
-defmodule Arcana.Pipeline.Searcher do
+defmodule Arcana.Searcher do
   @moduledoc """
-  Behaviour for search execution in the Agent pipeline.
+  Behaviour for search execution in `Arcana.Pipeline`.
 
   The searcher retrieves relevant chunks from a knowledge base based on the query.
   This allows swapping Arcana's built-in pgvector search for any search backend.
 
   ## Built-in Implementations
 
-  - `Arcana.Pipeline.Searcher.Arcana` - Uses Arcana's pgvector search (default)
+  - `Arcana.Searcher.Arcana` - Uses Arcana's pgvector search (default)
 
   ## Implementing a Custom Searcher
 
       defmodule MyApp.ElasticsearchSearcher do
-        @behaviour Arcana.Pipeline.Searcher
+        @behaviour Arcana.Searcher
 
         @impl true
         def search(question, collection, opts) do

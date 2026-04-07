@@ -27,14 +27,14 @@ This logs all Arcana operations with timing:
 ```
 [info] [Arcana] search completed in 42ms (15 results)
 [info] [Arcana] llm.complete completed in 1.23s [openai:gpt-4o-mini] ok (156 chars) prompt=892chars
-[info] [Arcana] agent.gate completed in 180ms (skip_retrieval: false)
-[info] [Arcana] agent.rewrite completed in 235ms
-[info] [Arcana] agent.expand completed in 2.15s ("machine learning ML models...")
-[info] [Arcana] agent.search completed in 156ms (25 chunks)
-[info] [Arcana] agent.reason completed in 1.2s (1 iteration)
-[info] [Arcana] agent.rerank completed in 312ms (10/25 kept)
-[info] [Arcana] agent.answer completed in 3.25s
-[info] [Arcana] agent.ground completed in 85ms (score: 0.95, 1 hallucinated span)
+[info] [Arcana] pipeline.gate completed in 180ms (skip_retrieval: false)
+[info] [Arcana] pipeline.rewrite completed in 235ms
+[info] [Arcana] pipeline.expand completed in 2.15s ("machine learning ML models...")
+[info] [Arcana] pipeline.search completed in 156ms (25 chunks)
+[info] [Arcana] pipeline.reason completed in 1.2s (1 iteration)
+[info] [Arcana] pipeline.rerank completed in 312ms (10/25 kept)
+[info] [Arcana] pipeline.answer completed in 3.25s
+[info] [Arcana] pipeline.ground completed in 85ms (score: 0.95, 1 hallucinated span)
 [info] [Arcana] ask completed in 6.12s
 ```
 
@@ -73,22 +73,32 @@ All events use `:telemetry.span/3`, which emits `:start`, `:stop`, and `:excepti
 | `[:arcana, :embed, :*]` | `system_time`, `duration` | `text`, `dimensions` |
 | `[:arcana, :llm, :complete, :*]` | `system_time`, `duration` | `model`, `prompt_length`, `success`, `response_length`, `error` |
 
-### Agent Pipeline Events
+### Pipeline Events
 
-Each step in the Agent pipeline emits its own events:
+Each step in `Arcana.Pipeline` emits its own span under `[:arcana, :pipeline, ...]`. The events were previously emitted under `[:arcana, :agent, ...]`; that prefix was renamed to `:pipeline` along with the module rename and is no longer emitted. Update any existing handlers.
 
 | Event | Metadata |
 |-------|----------|
-| `[:arcana, :agent, :gate, :*]` | `question`, `skip_retrieval` |
-| `[:arcana, :agent, :rewrite, :*]` | `question`, `rewritten_query` |
-| `[:arcana, :agent, :select, :*]` | `selected` (collections) |
-| `[:arcana, :agent, :expand, :*]` | `question`, `expanded_query` |
-| `[:arcana, :agent, :decompose, :*]` | `question`, `sub_question_count` |
-| `[:arcana, :agent, :search, :*]` | `question`, `total_chunks` |
-| `[:arcana, :agent, :reason, :*]` | `question`, `iterations` |
-| `[:arcana, :agent, :rerank, :*]` | `question`, `chunks_before`, `chunks_after` |
-| `[:arcana, :agent, :answer, :*]` | `question`, `context_chunk_count` |
-| `[:arcana, :agent, :ground, :*]` | `score`, `hallucinated_span_count`, `faithful_span_count` |
+| `[:arcana, :pipeline, :gate, :*]` | `question`, `skip_retrieval` |
+| `[:arcana, :pipeline, :rewrite, :*]` | `question`, `rewritten_query` |
+| `[:arcana, :pipeline, :select, :*]` | `selected` (collections) |
+| `[:arcana, :pipeline, :expand, :*]` | `question`, `expanded_query` |
+| `[:arcana, :pipeline, :decompose, :*]` | `question`, `sub_question_count` |
+| `[:arcana, :pipeline, :search, :*]` | `question`, `total_chunks` |
+| `[:arcana, :pipeline, :reason, :*]` | `question`, `iterations` |
+| `[:arcana, :pipeline, :rerank, :*]` | `question`, `chunks_before`, `chunks_after` |
+| `[:arcana, :pipeline, :answer, :*]` | `question`, `context_chunk_count` |
+| `[:arcana, :pipeline, :ground, :*]` | `score`, `hallucinated_span_count`, `faithful_span_count` |
+
+### Loop Events
+
+`Arcana.Loop` emits a single span around the whole agent loop run:
+
+| Event | Metadata |
+|-------|----------|
+| `[:arcana, :loop, :*]` | `question`, `max_iterations`, `tool_count`, `iterations`, `terminated_by` |
+
+The `:terminated_by` value tells you how the loop ended: `:answered`, `:gave_up`, `:max_iterations`, or `:error`. For per-iteration telemetry, attach to the `[:arcana, :search, :*]` events that fire from inside the search tool.
 
 ### VectorStore Events
 
@@ -150,12 +160,14 @@ defmodule MyApp.ArcanaMetrics do
       [:arcana, :ask, :stop],
       [:arcana, :embed, :stop],
       [:arcana, :llm, :complete, :stop],
-      # Agent pipeline
-      [:arcana, :agent, :gate, :stop],
-      [:arcana, :agent, :rerank, :stop],
-      [:arcana, :agent, :reason, :stop],
-      [:arcana, :agent, :answer, :stop],
-      [:arcana, :agent, :ground, :stop],
+      # Pipeline
+      [:arcana, :pipeline, :gate, :stop],
+      [:arcana, :pipeline, :rerank, :stop],
+      [:arcana, :pipeline, :reason, :stop],
+      [:arcana, :pipeline, :answer, :stop],
+      [:arcana, :pipeline, :ground, :stop],
+      # Loop
+      [:arcana, :loop, :stop],
       # VectorStore
       [:arcana, :vector_store, :store, :stop],
       [:arcana, :vector_store, :search, :stop],
@@ -238,12 +250,12 @@ defmodule MyApp.Telemetry do
       ),
       counter("arcana.llm.complete.stop.prompt_length"),
 
-      # Agent pipeline steps
-      summary("arcana.agent.rerank.stop.duration",
+      # Pipeline steps
+      summary("arcana.pipeline.rerank.stop.duration",
         unit: {:native, :millisecond}
       ),
-      last_value("arcana.agent.rerank.stop.kept"),
-      summary("arcana.agent.answer.stop.duration",
+      last_value("arcana.pipeline.rerank.stop.kept"),
+      summary("arcana.pipeline.answer.stop.duration",
         unit: {:native, :millisecond}
       ),
 
@@ -358,19 +370,19 @@ The built-in logger makes it easy to spot bottlenecks:
 
 In this example, the LLM call dominates total time (3.2s of 3.3s).
 
-### Track Agent Pipeline Steps
+### Track Pipeline Steps
 
-For agentic RAG, each pipeline step is instrumented:
+For `Arcana.Pipeline`, each step is instrumented:
 
 ```
-[info] [Arcana] agent.gate completed in 150ms (skip_retrieval: false)
-[info] [Arcana] agent.rewrite completed in 180ms ("what are elixir macros")
-[info] [Arcana] agent.expand completed in 220ms ("elixir macros metaprogramming...")
-[info] [Arcana] agent.search completed in 35ms (25 chunks)
-[info] [Arcana] agent.reason completed in 850ms (1 iteration)
-[info] [Arcana] agent.rerank completed in 890ms (8/25 kept)
-[info] [Arcana] agent.answer completed in 2.1s
-[info] [Arcana] agent.ground completed in 75ms (score: 0.92, 1 hallucinated span)
+[info] [Arcana] pipeline.gate completed in 150ms (skip_retrieval: false)
+[info] [Arcana] pipeline.rewrite completed in 180ms ("what are elixir macros")
+[info] [Arcana] pipeline.expand completed in 220ms ("elixir macros metaprogramming...")
+[info] [Arcana] pipeline.search completed in 35ms (25 chunks)
+[info] [Arcana] pipeline.reason completed in 850ms (1 iteration)
+[info] [Arcana] pipeline.rerank completed in 890ms (8/25 kept)
+[info] [Arcana] pipeline.answer completed in 2.1s
+[info] [Arcana] pipeline.ground completed in 75ms (score: 0.92, 1 hallucinated span)
 ```
 
 Here, reranking takes 890ms - if this is too slow, consider:
@@ -435,7 +447,7 @@ end
 
 2. **Focus on LLM latency** - This is usually the bottleneck; track it closely
 
-3. **Monitor reranking** - If using Agent.rerank/2, watch the kept/original ratio
+3. **Monitor reranking** - If using `Pipeline.rerank/2`, watch the kept/original ratio
 
 4. **Track by collection** - Tag metrics with collection names to identify slow document sets
 

@@ -1,4 +1,4 @@
-defmodule Arcana.Pipeline.Reranker.LLM do
+defmodule Arcana.Reranker.LLM do
   @moduledoc """
   LLM-based re-ranker that scores chunk relevance in a single batched call.
 
@@ -7,14 +7,14 @@ defmodule Arcana.Pipeline.Reranker.LLM do
 
   ## Usage
 
-      # With Agent pipeline (uses ctx.llm automatically)
+      # With Arcana.Pipeline (uses ctx.llm automatically)
       ctx
       |> Pipeline.search()
       |> Pipeline.rerank()
       |> Pipeline.answer()
 
       # Directly
-      {:ok, reranked} = Arcana.Pipeline.Reranker.LLM.rerank(
+      {:ok, reranked} = Arcana.Reranker.LLM.rerank(
         "What is Elixir?",
         chunks,
         llm: &my_llm/1,
@@ -33,11 +33,11 @@ defmodule Arcana.Pipeline.Reranker.LLM do
       LLM.rerank("question", chunks, llm: llm, prompt: prompt_fn)
   """
 
-  @behaviour Arcana.Pipeline.Reranker
+  @behaviour Arcana.Reranker
 
   @default_threshold 7
 
-  @impl Arcana.Pipeline.Reranker
+  @impl Arcana.Reranker
   def rerank(_question, [], _opts), do: {:ok, []}
 
   def rerank(question, chunks, opts) do

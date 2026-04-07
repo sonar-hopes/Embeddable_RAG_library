@@ -1,6 +1,6 @@
 defmodule Arcana.EndToEnd.AgentTest do
   @moduledoc """
-  End-to-end tests for Agent pipeline with real LLM APIs.
+  End-to-end tests for `Arcana.Pipeline` with real LLM APIs.
 
   Run with: `mix test --include end_to_end`
   Or just this file: `mix test test/arcana/end_to_end/agent_test.exs --include end_to_end`

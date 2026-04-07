@@ -185,8 +185,8 @@ defmodule Arcana.Pipeline.RewriteTest do
       :telemetry.attach_many(
         ref,
         [
-          [:arcana, :agent, :rewrite, :start],
-          [:arcana, :agent, :rewrite, :stop]
+          [:arcana, :pipeline, :rewrite, :start],
+          [:arcana, :pipeline, :rewrite, :stop]
         ],
         fn event, measurements, metadata, _ ->
           send(test_pid, {event, measurements, metadata})
@@ -199,8 +199,8 @@ defmodule Arcana.Pipeline.RewriteTest do
       Pipeline.new("Hey, tell me about Elixir", repo: Arcana.TestRepo, llm: llm)
       |> Pipeline.rewrite()
 
-      assert_receive {[:arcana, :agent, :rewrite, :start], _, %{question: _}}
-      assert_receive {[:arcana, :agent, :rewrite, :stop], _, %{rewritten_query: "rewritten"}}
+      assert_receive {[:arcana, :pipeline, :rewrite, :start], _, %{question: _}}
+      assert_receive {[:arcana, :pipeline, :rewrite, :stop], _, %{rewritten_query: "rewritten"}}
 
       :telemetry.detach(ref)
     end

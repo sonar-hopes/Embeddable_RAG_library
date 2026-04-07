@@ -1,4 +1,4 @@
-defmodule Arcana.Pipeline.Grounder do
+defmodule Arcana.Grounder do
   @moduledoc """
   Behaviour for grounding analysis on LLM-generated answers.
 
@@ -7,16 +7,16 @@ defmodule Arcana.Pipeline.Grounder do
 
   ## Built-in Implementations
 
-  - `Arcana.Pipeline.Grounder.Hallmark` - Uses Hallmark (Vectara HHEM via Bumblebee) for sentence-level NLI scoring (default)
+  - `Arcana.Grounder.Hallmark` - Uses Hallmark (Vectara HHEM via Bumblebee) for sentence-level NLI scoring (default)
 
   ## Custom Implementations
 
   Implement the `ground/3` callback:
 
       defmodule MyApp.CustomGrounder do
-        @behaviour Arcana.Pipeline.Grounder
+        @behaviour Arcana.Grounder
 
-        @impl Arcana.Pipeline.Grounder
+        @impl Arcana.Grounder
         def ground(answer, chunks, opts) do
           # Your custom grounding logic
           {:ok, %Arcana.Grounding.Result{score: 1.0, hallucinated_spans: []}}

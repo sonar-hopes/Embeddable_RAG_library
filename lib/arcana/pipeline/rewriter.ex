@@ -1,6 +1,6 @@
 defmodule Arcana.Pipeline.Rewriter do
   @moduledoc """
-  Behaviour for query rewriting in the Agent pipeline.
+  Behaviour for query rewriting in `Arcana.Pipeline`.
 
   The rewriter transforms conversational input into clear search queries
   by removing filler phrases, greetings, and other noise while preserving

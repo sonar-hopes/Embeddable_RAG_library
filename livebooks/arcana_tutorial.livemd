@@ -271,13 +271,15 @@ Vl.new(width: 400, height: 200, title: "Query-Document Similarity")
 )
 ```
 
-## 6. Agentic RAG Pipeline
+## 6. Pipeline (Modular RAG)
 
-For complex questions, Arcana provides an Agent pipeline with retrieval gating, multi-hop reasoning, query expansion, and re-ranking.
+For complex questions, Arcana provides `Arcana.Pipeline` with retrieval gating, multi-hop reasoning, query expansion, and re-ranking. Each step is a behaviour you can replace, and the pipeline is composed at code time (you decide the order).
+
+If you want the LLM to drive the control flow at runtime instead, see `Arcana.Loop` later in this notebook.
 
 ### Define an LLM Function
 
-The agent needs an LLM to make decisions. Let's create a simple mock:
+The pipeline needs an LLM to make decisions. Let's create a simple mock:
 
 ```elixir
 # Mock LLM that returns structured responses
@@ -319,12 +321,12 @@ end
 ```elixir
 alias Arcana.Pipeline
 
-# First, we need a repo-like interface for the agent
+# First, we need a repo-like interface for the pipeline
 # Since we're using memory backend, we'll work directly with VectorStore
 
 # Simple search and answer
 ctx =
-  Agent.new("Tell me about Elixir and its web framework",
+  Pipeline.new("Tell me about Elixir and its web framework",
     repo: nil,  # Not using database
     llm: mock_llm,
     limit: 3
@@ -487,7 +489,7 @@ Query rewriting cleans up conversational input into clear search queries. This i
 
 ### How It Works
 
-The `Agent.rewrite/2` step uses an LLM to remove conversational noise while preserving important terms:
+The `Pipeline.rewrite/2` step uses an LLM to remove conversational noise while preserving important terms:
 
 ```
 Original: "Hey, I was wondering if you could tell me about Elixir"
@@ -514,9 +516,9 @@ rewrite_llm = fn prompt ->
   end
 end
 
-# Using with Agent pipeline
-# ctx = Agent.new("Hey, can you tell me about Elixir?", repo: nil, llm: rewrite_llm)
-#   |> Agent.rewrite()
+# Using with Pipeline
+# ctx = Pipeline.new("Hey, can you tell me about Elixir?", repo: nil, llm: rewrite_llm)
+#   |> Pipeline.rewrite()
 # ctx.rewritten_query => "about Elixir"
 
 IO.puts("Query rewriting removes conversational noise for better retrieval")
@@ -532,10 +534,10 @@ IO.puts("Query rewriting removes conversational noise for better retrieval")
 You can combine both (rewrite runs first):
 
 ```elixir
-# ctx = Agent.new("Hey, tell me about ML", ...)
-#   |> Agent.rewrite()    # "Hey, tell me about ML" → "about ML"
-#   |> Agent.expand()     # "about ML" → "about ML machine learning..."
-#   |> Agent.search()
+# ctx = Pipeline.new("Hey, tell me about ML", ...)
+#   |> Pipeline.rewrite()    # "Hey, tell me about ML" → "about ML"
+#   |> Pipeline.expand()     # "about ML" → "about ML machine learning..."
+#   |> Pipeline.search()
 ```
 
 ## 10. Query Expansion
@@ -544,7 +546,7 @@ Query expansion improves search results by adding synonyms and related terms to 
 
 ### How It Works
 
-The `Agent.expand/2` step uses an LLM to analyze your query and add related terms:
+The `Pipeline.expand/2` step uses an LLM to analyze your query and add related terms:
 
 ```
 Original: "ML models"
@@ -568,7 +570,7 @@ expand_llm = fn prompt ->
   end
 end
 
-# Using with Agent pipeline
+# Using with Pipeline
 alias Arcana.Pipeline
 
 # First ingest a document about ML
@@ -580,7 +582,7 @@ alias Arcana.Pipeline
 )
 
 # The expand step would add synonyms before search
-# ctx = Agent.new("ML", repo: nil, llm: expand_llm) |> Agent.expand()
+# ctx = Pipeline.new("ML", repo: nil, llm: expand_llm) |> Pipeline.expand()
 # ctx.expanded_query => "ML machine learning artificial intelligence..."
 
 IO.puts("Query expansion adds synonyms to improve recall")
@@ -596,10 +598,10 @@ IO.puts("Query expansion adds synonyms to improve recall")
 You can combine both:
 
 ```elixir
-# ctx = Agent.new("What is ML and how does it work?", ...)
-#   |> Agent.expand()      # Adds synonyms
-#   |> Agent.decompose()   # Splits into sub-questions
-#   |> Agent.search()
+# ctx = Pipeline.new("What is ML and how does it work?", ...)
+#   |> Pipeline.expand()      # Adds synonyms
+#   |> Pipeline.decompose()   # Splits into sub-questions
+#   |> Pipeline.search()
 ```
 
 ## 11. Re-ranking
@@ -639,22 +641,22 @@ scoring_llm = fn prompt ->
 end
 
 # Rerank filters low-scoring chunks
-# ctx = Agent.new("What is Elixir?", ...)
-#   |> Agent.search()
-#   |> Agent.rerank(threshold: 7)  # Keep only chunks scoring 7+
+# ctx = Pipeline.new("What is Elixir?", ...)
+#   |> Pipeline.search()
+#   |> Pipeline.rerank(threshold: 7)  # Keep only chunks scoring 7+
 
 IO.puts("Re-ranking filters out irrelevant chunks")
 ```
 
 ### Custom Reranker
 
-Implement the `Arcana.Pipeline.Reranker` behaviour for custom scoring logic:
+Implement the `Arcana.Reranker` behaviour for custom scoring logic:
 
 ```elixir
 defmodule MyKeywordReranker do
-  @behaviour Arcana.Pipeline.Reranker
+  @behaviour Arcana.Reranker
 
-  @impl Arcana.Pipeline.Reranker
+  @impl Arcana.Reranker
   def rerank(_question, chunks, opts) do
     threshold = Keyword.get(opts, :threshold, 5)
 
@@ -672,20 +674,20 @@ defmodule MyKeywordReranker do
   end
 end
 
-# Use with: Agent.rerank(ctx, reranker: MyKeywordReranker)
+# Use with: Pipeline.rerank(ctx, reranker: MyKeywordReranker)
 ```
 
 ### Full Pipeline
 
 ```elixir
 # Complete agentic RAG pipeline:
-# ctx = Agent.new("What is Elixir?", repo: MyApp.Repo, llm: my_llm)
-#   |> Agent.rewrite()                    # Clean up conversational input
-#   |> Agent.select()                     # Choose collections
-#   |> Agent.expand()                     # Add synonyms
-#   |> Agent.search()                     # Retrieve chunks
-#   |> Agent.rerank()                     # Filter by relevance
-#   |> Agent.answer(self_correct: true)   # Generate and refine answer
+# ctx = Pipeline.new("What is Elixir?", repo: MyApp.Repo, llm: my_llm)
+#   |> Pipeline.rewrite()                    # Clean up conversational input
+#   |> Pipeline.select()                     # Choose collections
+#   |> Pipeline.expand()                     # Add synonyms
+#   |> Pipeline.search()                     # Retrieve chunks
+#   |> Pipeline.rerank()                     # Filter by relevance
+#   |> Pipeline.answer(self_correct: true)   # Generate and refine answer
 
 IO.puts("The full pipeline: rewrite → select → expand → search → rerank → answer")
 ```
@@ -743,10 +745,10 @@ For production, use the Ecto backend which persists to PostgreSQL.
 The `answer/2` step can evaluate and refine answers to ensure they're grounded in the context:
 
 ```elixir
-# ctx = Agent.new("What is Elixir?", repo: MyApp.Repo, llm: my_llm)
-#   |> Agent.search()
-#   |> Agent.rerank()
-#   |> Agent.answer(self_correct: true, max_corrections: 2)
+# ctx = Pipeline.new("What is Elixir?", repo: MyApp.Repo, llm: my_llm)
+#   |> Pipeline.search()
+#   |> Pipeline.rerank()
+#   |> Pipeline.answer(self_correct: true, max_corrections: 2)
 #
 # ctx.answer            # Final (possibly refined) answer
 # ctx.correction_count  # Number of corrections made
@@ -767,14 +769,14 @@ You can skip LLM-based collection selection by passing `:collection` or `:collec
 
 ```elixir
 # Search a specific collection without using select/2
-# ctx = Agent.new("How do I deploy Phoenix?", repo: MyApp.Repo, llm: my_llm)
-#   |> Agent.search(collection: "deployment-docs")
-#   |> Agent.answer()
+# ctx = Pipeline.new("How do I deploy Phoenix?", repo: MyApp.Repo, llm: my_llm)
+#   |> Pipeline.search(collection: "deployment-docs")
+#   |> Pipeline.answer()
 
 # Search multiple specific collections
-# ctx = Agent.new("What are the best practices?", repo: MyApp.Repo, llm: my_llm)
-#   |> Agent.search(collections: ["docs", "tutorials"])
-#   |> Agent.answer()
+# ctx = Pipeline.new("What are the best practices?", repo: MyApp.Repo, llm: my_llm)
+#   |> Pipeline.search(collections: ["docs", "tutorials"])
+#   |> Pipeline.answer()
 
 IO.puts("""
 Collection selection priority:
@@ -808,10 +810,10 @@ Attribution:     sources: [chunk_2: 1.0]       sources: [chunk_1: 0.75]
 
 ```elixir
 # In a real pipeline with Hallmark:
-# ctx = Agent.new("When was Elixir created?", repo: repo, llm: llm)
-#   |> Agent.search(collection: "docs")
-#   |> Agent.answer()
-#   |> Agent.ground()
+# ctx = Pipeline.new("When was Elixir created?", repo: repo, llm: llm)
+#   |> Pipeline.search(collection: "docs")
+#   |> Pipeline.answer()
+#   |> Pipeline.ground()
 #
 # ctx.grounding.score              # 0.85 (weighted average consistency)
 # ctx.grounding.hallucinated_spans # sentences the model flagged
@@ -868,7 +870,7 @@ Replace the default Hallmark grounder with your own logic:
 ```elixir
 # Module-based
 # defmodule MyGrounder do
-#   @behaviour Arcana.Pipeline.Grounder
+#   @behaviour Arcana.Grounder
 #
 #   @impl true
 #   def ground(answer, chunks, _opts) do
@@ -881,7 +883,7 @@ Replace the default Hallmark grounder with your own logic:
 # end
 
 # Inline function
-# Agent.ground(ctx, grounder: fn answer, chunks, _opts ->
+# Pipeline.ground(ctx, grounder: fn answer, chunks, _opts ->
 #   {:ok, %Arcana.Grounding.Result{score: 1.0, hallucinated_spans: [], faithful_spans: []}}
 # end)
 
@@ -902,17 +904,20 @@ IO.puts("Grounding is pluggable: use Hallmark, a custom module, or an inline fun
 | **Query Expansion** | Add synonyms for better recall |
 | **Multi-hop Reasoning** | Search again if results are insufficient |
 | **Re-ranking** | Filter chunks by LLM-scored relevance |
-| **Agent Pipeline** | Gate → Rewrite → Select → Expand → Search → Reason → Rerank → Answer → Ground |
-| **Grounding** | Detect hallucinated vs faithful spans with chunk attribution |
+| **Pipeline (Modular RAG)** | Gate → Rewrite → Select → Expand → Search → Reason → Rerank → Answer → Ground. You compose the steps. |
+| **Loop (Agentic RAG)** | LLM picks tools each turn (`search` / `answer` / `give_up`). The model decides the control flow, including when to refine queries and when to issue separate searches for different aspects of a question. |
+| **Controller / answerer split** | In `Arcana.Loop`, pair a cheap controller LLM (picks tools) with a stronger answerer LLM (writes the user-facing answer) via `controller_llm:` and `answer_llm:` |
+| **Grounding** | Detect hallucinated vs faithful spans with chunk attribution. Available on both Pipeline (`Pipeline.ground/2`) and Loop (`Loop.ground/2`), sharing the same `Arcana.Grounder` behaviour. |
 | **GraphRAG** | Knowledge graph with entity extraction (supports memory and Ecto backends) |
 
 ### Next Steps
 
 1. Try with real documents (PDFs, markdown files)
 2. Connect to pgvector for persistence
-3. Use a real LLM (OpenAI, Anthropic) for the agent
-4. Add to your Phoenix application with the dashboard
-5. Enable GraphRAG for entity-based retrieval (see [GraphRAG Guide](../guides/graphrag.md))
+3. Use a real LLM (OpenAI, Anthropic, Z.ai) for the pipeline
+4. Try `Arcana.Loop` for open-ended questions where the right sequence of searches isn't knowable upfront (see the [Loop guide](../guides/loop.md))
+5. Add to your Phoenix application with the dashboard
+6. Enable GraphRAG for entity-based retrieval (see the [GraphRAG guide](../guides/graphrag.md))
 
 ```elixir
 # Cleanup

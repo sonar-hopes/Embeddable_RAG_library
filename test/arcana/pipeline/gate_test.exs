@@ -79,8 +79,8 @@ defmodule Arcana.Pipeline.GateTest do
       :telemetry.attach_many(
         ref,
         [
-          [:arcana, :agent, :gate, :start],
-          [:arcana, :agent, :gate, :stop]
+          [:arcana, :pipeline, :gate, :start],
+          [:arcana, :pipeline, :gate, :stop]
         ],
         fn event, measurements, metadata, _ ->
           send(test_pid, {:telemetry, event, measurements, metadata})
@@ -93,8 +93,8 @@ defmodule Arcana.Pipeline.GateTest do
       Pipeline.new("test", repo: Arcana.TestRepo, llm: llm)
       |> Pipeline.gate()
 
-      assert_receive {:telemetry, [:arcana, :agent, :gate, :start], _, %{question: "test"}}
-      assert_receive {:telemetry, [:arcana, :agent, :gate, :stop], _, %{skip_retrieval: false}}
+      assert_receive {:telemetry, [:arcana, :pipeline, :gate, :start], _, %{question: "test"}}
+      assert_receive {:telemetry, [:arcana, :pipeline, :gate, :stop], _, %{skip_retrieval: false}}
 
       :telemetry.detach(ref)
     end

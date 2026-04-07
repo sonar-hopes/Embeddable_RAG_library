@@ -78,8 +78,8 @@ defmodule Arcana.Pipeline.DecomposeTest do
       :telemetry.attach_many(
         ref,
         [
-          [:arcana, :agent, :decompose, :start],
-          [:arcana, :agent, :decompose, :stop]
+          [:arcana, :pipeline, :decompose, :start],
+          [:arcana, :pipeline, :decompose, :stop]
         ],
         fn event, measurements, metadata, _ ->
           send(test_pid, {:telemetry, event, measurements, metadata})
@@ -94,8 +94,8 @@ defmodule Arcana.Pipeline.DecomposeTest do
       Pipeline.new("complex question", repo: Arcana.TestRepo, llm: llm)
       |> Pipeline.decompose()
 
-      assert_receive {:telemetry, [:arcana, :agent, :decompose, :start], _, _}
-      assert_receive {:telemetry, [:arcana, :agent, :decompose, :stop], _, metadata}
+      assert_receive {:telemetry, [:arcana, :pipeline, :decompose, :start], _, _}
+      assert_receive {:telemetry, [:arcana, :pipeline, :decompose, :stop], _, metadata}
       assert metadata.sub_question_count == 2
 
       :telemetry.detach(ref)

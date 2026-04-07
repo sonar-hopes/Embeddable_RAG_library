@@ -1,4 +1,4 @@
-defmodule Arcana.Pipeline.Reranker.ColBERTTest do
+defmodule Arcana.Reranker.ColBERTTest do
   @moduledoc """
   Tests for ColBERT reranker.
 
@@ -6,7 +6,7 @@ defmodule Arcana.Pipeline.Reranker.ColBERTTest do
   """
   use Arcana.DataCase, async: false
 
-  alias Arcana.Pipeline.Reranker.ColBERT
+  alias Arcana.Reranker.ColBERT
 
   # ColBERT tests require Stephen which loads a model (slow)
   @moduletag :colbert

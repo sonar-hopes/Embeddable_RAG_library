@@ -143,8 +143,8 @@ defmodule Arcana.Pipeline.SelectTest do
       :telemetry.attach_many(
         ref,
         [
-          [:arcana, :agent, :select, :start],
-          [:arcana, :agent, :select, :stop]
+          [:arcana, :pipeline, :select, :start],
+          [:arcana, :pipeline, :select, :stop]
         ],
         fn event, measurements, metadata, _ ->
           send(test_pid, {:telemetry, event, measurements, metadata})
@@ -159,8 +159,8 @@ defmodule Arcana.Pipeline.SelectTest do
       Pipeline.new("question", repo: Arcana.TestRepo, llm: llm)
       |> Pipeline.select(collections: ["docs", "api"])
 
-      assert_receive {:telemetry, [:arcana, :agent, :select, :start], _, _}
-      assert_receive {:telemetry, [:arcana, :agent, :select, :stop], _, metadata}
+      assert_receive {:telemetry, [:arcana, :pipeline, :select, :start], _, _}
+      assert_receive {:telemetry, [:arcana, :pipeline, :select, :stop], _, metadata}
       assert metadata.selected_count == 1
 
       :telemetry.detach(ref)

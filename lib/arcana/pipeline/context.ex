@@ -1,6 +1,6 @@
 defmodule Arcana.Pipeline.Context do
   @moduledoc """
-  Context struct that flows through the agent pipeline.
+  Context struct that flows through `Arcana.Pipeline`.
 
   Each step in the pipeline reads from and writes to this struct,
   allowing steps to be composed via pipes.

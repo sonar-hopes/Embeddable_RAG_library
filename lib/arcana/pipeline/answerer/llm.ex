@@ -7,7 +7,7 @@ defmodule Arcana.Pipeline.Answerer.LLM do
 
   ## Usage
 
-      # With Agent pipeline (uses ctx.llm automatically)
+      # With Arcana.Pipeline (uses ctx.llm automatically)
       ctx
       |> Pipeline.search()
       |> Pipeline.answer()

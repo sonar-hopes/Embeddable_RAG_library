@@ -131,7 +131,7 @@ defmodule ArcanaWeb.AskLive do
       steps = [:expand, :decompose, :select, :search, :self_correct, :rerank, :answer, :ground]
 
       events =
-        Enum.map(steps, &[:arcana, :agent, &1, :start]) ++
+        Enum.map(steps, &[:arcana, :pipeline, &1, :start]) ++
           [[:arcana, :graph, :search, :start]]
 
       :telemetry.attach_many(
@@ -141,7 +141,7 @@ defmodule ArcanaWeb.AskLive do
           [:arcana, :graph, :search, :start], _measurements, _metadata, _config ->
             send(parent, {:pipeline_progress, "Searching with graph connections..."})
 
-          [:arcana, :agent, step, :start], _measurements, _metadata, _config ->
+          [:arcana, :pipeline, step, :start], _measurements, _metadata, _config ->
             label =
               if step == :search and graph_enabled,
                 do: "Searching with graph connections...",

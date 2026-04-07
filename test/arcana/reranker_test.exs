@@ -1,7 +1,7 @@
 defmodule Arcana.RerankerTest do
   use ExUnit.Case, async: true
 
-  alias Arcana.Pipeline.Reranker.LLM
+  alias Arcana.Reranker.LLM
 
   describe "Pipeline.Reranker.LLM.rerank/3" do
     test "scores and filters chunks by threshold" do

@@ -1,6 +1,6 @@
 defmodule Arcana.Pipeline.Answerer do
   @moduledoc """
-  Behaviour for answer generation in the Agent pipeline.
+  Behaviour for answer generation in `Arcana.Pipeline`.
 
   The answerer generates the final response based on the question and
   retrieved context chunks.

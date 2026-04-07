@@ -54,8 +54,8 @@ defmodule Arcana.Pipeline.PipelineTest do
       :telemetry.attach_many(
         ref,
         [
-          [:arcana, :agent, :search, :start],
-          [:arcana, :agent, :search, :stop]
+          [:arcana, :pipeline, :search, :start],
+          [:arcana, :pipeline, :search, :stop]
         ],
         fn event, measurements, metadata, _ ->
           send(test_pid, {:telemetry, event, measurements, metadata})
@@ -66,8 +66,8 @@ defmodule Arcana.Pipeline.PipelineTest do
       Pipeline.new("test", repo: Arcana.TestRepo, llm: &mock_llm/1)
       |> Pipeline.search()
 
-      assert_receive {:telemetry, [:arcana, :agent, :search, :start], _, _}
-      assert_receive {:telemetry, [:arcana, :agent, :search, :stop], _, metadata}
+      assert_receive {:telemetry, [:arcana, :pipeline, :search, :start], _, _}
+      assert_receive {:telemetry, [:arcana, :pipeline, :search, :stop], _, metadata}
       assert is_integer(metadata.result_count)
 
       :telemetry.detach(ref)
@@ -80,8 +80,8 @@ defmodule Arcana.Pipeline.PipelineTest do
       :telemetry.attach_many(
         ref,
         [
-          [:arcana, :agent, :answer, :start],
-          [:arcana, :agent, :answer, :stop]
+          [:arcana, :pipeline, :answer, :start],
+          [:arcana, :pipeline, :answer, :stop]
         ],
         fn event, measurements, metadata, _ ->
           send(test_pid, {:telemetry, event, measurements, metadata})
@@ -95,8 +95,8 @@ defmodule Arcana.Pipeline.PipelineTest do
       |> Pipeline.search()
       |> Pipeline.answer()
 
-      assert_receive {:telemetry, [:arcana, :agent, :answer, :start], _, _}
-      assert_receive {:telemetry, [:arcana, :agent, :answer, :stop], _, metadata}
+      assert_receive {:telemetry, [:arcana, :pipeline, :answer, :start], _, _}
+      assert_receive {:telemetry, [:arcana, :pipeline, :answer, :stop], _, metadata}
       assert is_integer(metadata.context_chunk_count)
 
       :telemetry.detach(ref)

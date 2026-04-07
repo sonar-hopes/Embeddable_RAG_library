@@ -7,7 +7,7 @@ defmodule Arcana.Pipeline.Decomposer.LLM do
 
   ## Usage
 
-      # With Agent pipeline (uses ctx.llm automatically)
+      # With Arcana.Pipeline (uses ctx.llm automatically)
       ctx
       |> Pipeline.decompose()
       |> Pipeline.search()

@@ -166,9 +166,9 @@ defmodule MyAppWeb.ChatLive do
 end
 ```
 
-## Agentic RAG
+## Pipeline (Modular RAG)
 
-For complex questions, use the Agent pipeline:
+For complex questions, use `Arcana.Pipeline`. See the [Pipeline guide](pipeline.md) for the full reference.
 
 ```elixir
 llm = fn prompt -> ReqLLM.generate_text!("openai:gpt-4o-mini", prompt) end
@@ -187,14 +187,14 @@ All pipeline steps accept custom prompt options:
 
 ```elixir
 ctx
-|> Agent.select(collections: [...], prompt: fn question, collections -> "..." end)
-|> Agent.decompose(prompt: fn question -> "..." end)
-|> Agent.search(
+|> Pipeline.select(collections: [...], prompt: fn question, collections -> "..." end)
+|> Pipeline.decompose(prompt: fn question -> "..." end)
+|> Pipeline.search(
   self_correct: true,
   sufficient_prompt: fn question, chunks -> "..." end,
   rewrite_prompt: fn question, chunks -> "..." end
 )
-|> Agent.answer(prompt: fn question, chunks -> "..." end)
+|> Pipeline.answer(prompt: fn question, chunks -> "..." end)
 ```
 
 ## Cost Tracking

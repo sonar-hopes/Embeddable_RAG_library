@@ -139,9 +139,9 @@ defmodule Arcana.Pipeline.RerankTest do
 
     test "accepts custom reranker module" do
       defmodule TestReranker do
-        @behaviour Arcana.Pipeline.Reranker
+        @behaviour Arcana.Reranker
 
-        @impl Arcana.Pipeline.Reranker
+        @impl Arcana.Reranker
         def rerank(_question, chunks, _opts) do
           {:ok, Enum.reverse(chunks)}
         end
@@ -224,7 +224,7 @@ defmodule Arcana.Pipeline.RerankTest do
 
       :telemetry.attach(
         ref,
-        [:arcana, :agent, :rerank, :stop],
+        [:arcana, :pipeline, :rerank, :stop],
         fn event, measurements, metadata, _ ->
           send(test_pid, {:telemetry, event, measurements, metadata})
         end,
@@ -254,7 +254,7 @@ defmodule Arcana.Pipeline.RerankTest do
       |> Pipeline.search()
       |> Pipeline.rerank()
 
-      assert_receive {:telemetry, [:arcana, :agent, :rerank, :stop], _, stop_meta}
+      assert_receive {:telemetry, [:arcana, :pipeline, :rerank, :stop], _, stop_meta}
       assert is_integer(stop_meta.original)
       assert is_integer(stop_meta.kept)
 

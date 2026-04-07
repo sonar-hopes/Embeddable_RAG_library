@@ -1,6 +1,6 @@
 defmodule Arcana.Pipeline.Expander do
   @moduledoc """
-  Behaviour for query expansion in the Agent pipeline.
+  Behaviour for query expansion in `Arcana.Pipeline`.
 
   The expander adds synonyms, related terms, and alternative phrasings
   to improve document retrieval coverage.

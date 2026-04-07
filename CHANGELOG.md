@@ -20,18 +20,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     warnings will appear. The facade will be removed in 3.0.
   - **Behaviour modules were renamed and are NOT aliased.** If you
     implement custom modules with `@behaviour Arcana.Agent.Reranker`,
-    update them to `@behaviour Arcana.Pipeline.Reranker`. This is a
+    update them to `@behaviour Arcana.Reranker`. This is a
     one-line change. Affected behaviours:
-    - `Arcana.Agent.Searcher` → `Arcana.Pipeline.Searcher`
-    - `Arcana.Agent.Reranker` → `Arcana.Pipeline.Reranker`
+    - `Arcana.Agent.Searcher` → `Arcana.Searcher`
+    - `Arcana.Agent.Reranker` → `Arcana.Reranker`
     - `Arcana.Agent.Rewriter` → `Arcana.Pipeline.Rewriter`
     - `Arcana.Agent.Expander` → `Arcana.Pipeline.Expander`
     - `Arcana.Agent.Decomposer` → `Arcana.Pipeline.Decomposer`
     - `Arcana.Agent.Selector` → `Arcana.Pipeline.Selector`
     - `Arcana.Agent.Answerer` → `Arcana.Pipeline.Answerer`
-    - `Arcana.Agent.Grounder` → `Arcana.Pipeline.Grounder`
+    - `Arcana.Agent.Grounder` → `Arcana.Grounder`
   - The `Arcana.Agent.Context` struct is now `Arcana.Pipeline.Context`.
     Code that pattern matches on the struct module name needs updating.
+
+- **Moved three cross-cutting behaviours out of the `Pipeline` namespace
+  into the root `Arcana` namespace.** `Grounder`, `Searcher`, and
+  `Reranker` are used by both `Arcana.Pipeline` and `Arcana.Loop` (and by
+  `Arcana.search/2` for Searcher and Reranker), so they don't belong
+  under `Arcana.Pipeline`. The five remaining step behaviours (`Rewriter`,
+  `Expander`, `Decomposer`, `Selector`, `Answerer`) stay under
+  `Arcana.Pipeline.*` because they're genuinely Pipeline-specific steps.
+
+      Arcana.Pipeline.Grounder             → Arcana.Grounder
+      Arcana.Pipeline.Grounder.Hallmark    → Arcana.Grounder.Hallmark
+      Arcana.Pipeline.Searcher             → Arcana.Searcher
+      Arcana.Pipeline.Searcher.Arcana      → Arcana.Searcher.Arcana
+      Arcana.Pipeline.Reranker             → Arcana.Reranker
+      Arcana.Pipeline.Reranker.LLM         → Arcana.Reranker.LLM
+      Arcana.Pipeline.Reranker.CrossEncoder → Arcana.Reranker.CrossEncoder
+      Arcana.Pipeline.Reranker.ColBERT     → Arcana.Reranker.ColBERT
+
+  Update custom `@behaviour Arcana.Pipeline.Grounder` declarations,
+  `config :arcana, reranker: Arcana.Pipeline.Reranker.CrossEncoder`
+  entries, and any direct module references. No deprecated aliases at
+  the `Arcana.Pipeline.*` level — this is a single hard rename. The
+  `Arcana.Agent` facade from the first rename already covers users
+  coming from the legacy `Agent.*` names.
+
+- **Renamed pipeline telemetry events from `[:arcana, :agent, ...]` to
+  `[:arcana, :pipeline, ...]`.** All eleven Pipeline step spans (gate,
+  rewrite, select, expand, decompose, search, reason, rerank, answer,
+  ground, self_correct) now emit under the `:pipeline` prefix. The
+  legacy `:agent` prefix is no longer emitted at all. If you have
+  custom telemetry handlers attached to `[:arcana, :agent, :*]`, update
+  them to `[:arcana, :pipeline, :*]`. The metadata keys are unchanged.
+
+### Added
+
+- **`Arcana.Loop`** — Agentic RAG via an LLM-driven tool loop. Where
+  `Arcana.Pipeline` composes RAG steps you decide ahead of time, `Loop`
+  hands the wheel to the LLM: it picks tools (search, rewrite,
+  decompose, answer, give_up) each turn until it can answer or hits
+  `max_iterations`. Includes a fallback synthesis step that produces a
+  final answer from accumulated chunks when the loop runs out of budget
+  without an explicit `answer` call. Emits a single span at
+  `[:arcana, :loop, :*]`. See the [Loop guide](guides/loop.md).
 
 ## [1.6.0](https://github.com/georgeguimaraes/arcana/compare/v1.5.2...v1.6.0) (2026-03-04)
 

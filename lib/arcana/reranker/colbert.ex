@@ -1,4 +1,4 @@
-defmodule Arcana.Pipeline.Reranker.ColBERT do
+defmodule Arcana.Reranker.ColBERT do
   @moduledoc """
   ColBERT-style neural reranker using per-token embeddings and MaxSim scoring.
 
@@ -14,20 +14,20 @@ defmodule Arcana.Pipeline.Reranker.ColBERT do
 
   ## Usage
 
-      # With Agent pipeline
+      # With Arcana.Pipeline
       ctx
       |> Pipeline.search()
-      |> Pipeline.rerank(reranker: Arcana.Pipeline.Reranker.ColBERT)
+      |> Pipeline.rerank(reranker: Arcana.Reranker.ColBERT)
       |> Pipeline.answer()
 
       # With custom encoder
       ctx
       |> Pipeline.search()
-      |> Pipeline.rerank(reranker: {Arcana.Pipeline.Reranker.ColBERT, encoder: my_encoder})
+      |> Pipeline.rerank(reranker: {Arcana.Reranker.ColBERT, encoder: my_encoder})
       |> Pipeline.answer()
 
       # Directly
-      {:ok, reranked} = Arcana.Pipeline.Reranker.ColBERT.rerank(
+      {:ok, reranked} = Arcana.Reranker.ColBERT.rerank(
         "What is Elixir?",
         chunks,
         threshold: 0.5
@@ -53,11 +53,11 @@ defmodule Arcana.Pipeline.Reranker.ColBERT do
   """
 
   @compile {:no_warn_undefined, Stephen}
-  @behaviour Arcana.Pipeline.Reranker
+  @behaviour Arcana.Reranker
 
   @default_threshold 0.0
 
-  @impl Arcana.Pipeline.Reranker
+  @impl Arcana.Reranker
   def rerank(_question, [], _opts), do: {:ok, []}
 
   def rerank(question, chunks, opts) do

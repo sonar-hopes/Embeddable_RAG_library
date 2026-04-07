@@ -1,4 +1,4 @@
-defmodule Arcana.Pipeline.Grounder.Hallmark do
+defmodule Arcana.Grounder.Hallmark do
   @moduledoc """
   Default grounder using Hallmark (Vectara HHEM via Bumblebee).
 
@@ -20,14 +20,14 @@ defmodule Arcana.Pipeline.Grounder.Hallmark do
       ctx |> Pipeline.ground()
 
       # Explicitly
-      ctx |> Pipeline.ground(grounder: Arcana.Pipeline.Grounder.Hallmark)
+      ctx |> Pipeline.ground(grounder: Arcana.Grounder.Hallmark)
   """
 
-  @behaviour Arcana.Pipeline.Grounder
+  @behaviour Arcana.Grounder
 
   alias Arcana.Grounding
 
-  @impl Arcana.Pipeline.Grounder
+  @impl Arcana.Grounder
   def ground(answer, chunks, opts) do
     unless Code.ensure_loaded?(Hallmark) do
       raise """

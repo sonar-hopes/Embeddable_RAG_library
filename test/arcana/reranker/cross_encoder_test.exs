@@ -1,9 +1,9 @@
-defmodule Arcana.Pipeline.Reranker.CrossEncoderTest do
+defmodule Arcana.Reranker.CrossEncoderTest do
   use Arcana.DataCase, async: false
 
   @moduletag :serving
 
-  alias Arcana.Pipeline.Reranker.CrossEncoder
+  alias Arcana.Reranker.CrossEncoder
 
   setup_all do
     {:ok, _pid} = CrossEncoder.start_link()

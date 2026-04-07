@@ -1,25 +1,40 @@
-# Agentic RAG Pipeline
+# Pipeline (Modular RAG)
 
-Build sophisticated RAG workflows with Arcana's composable Agent pipeline.
+`Arcana.Pipeline` is Arcana's Modular RAG surface: a composable pipeline of pluggable steps that you wire together at code time. Each step is a behaviour with a sensible default implementation, and a `%Pipeline.Context{}` struct flows through them carrying the question, intermediate state, and final answer.
+
+This guide covers when to reach for `Arcana.Pipeline` over `Arcana.search/2` or `Arcana.Loop`, every step in the pipeline, how to swap in custom behaviours, and the telemetry events each step emits.
+
+## When to use Pipeline
+
+Use `Arcana.Pipeline` when you want **explicit control over the order and behavior of RAG steps** but you (the developer) still know the right sequence ahead of time. Typical reasons:
+
+- You need a non-default order (rewrite before decompose, decompose without expand, etc.)
+- You want to inspect intermediate state (`ctx.sub_questions`, `ctx.expanded_query`, `ctx.reason_iterations`) for debugging or logging
+- You're plugging in custom behaviours (your own searcher, your own reranker)
+- You want grounding (`ground/2`) which isn't run by `Arcana.ask/2`
+
+If you're happy with `Arcana.search` and `Arcana.ask`'s defaults, use those — they're a thin convenience wrapper over the same primitives.
+
+If the right sequence of searches **isn't** knowable upfront (the LLM should decide), use `Arcana.Loop` instead. See [Loop (Agentic RAG)](loop.md).
 
 ## Overview
 
-The `Arcana.Pipeline` module provides a pipeline-based approach to RAG where a context struct flows through each step:
+A `%Pipeline.Context{}` struct flows through each step:
 
 ```elixir
 alias Arcana.Pipeline
 
 ctx =
-  Agent.new("Compare Elixir and Erlang")
-  |> Agent.gate()        # Decide if retrieval is needed
-  |> Agent.rewrite()     # Clean up conversational input
-  |> Agent.expand()      # Expand query with synonyms
-  |> Agent.decompose()   # Break into sub-questions
-  |> Agent.search()      # Search for each sub-question
-  |> Agent.reason()      # Multi-hop: search again if needed
-  |> Agent.rerank()      # Re-rank results
-  |> Agent.answer()      # Generate final answer
-  |> Agent.ground()      # Detect hallucinations
+  Pipeline.new("Compare Elixir and Erlang")
+  |> Pipeline.gate()        # Decide if retrieval is needed
+  |> Pipeline.rewrite()     # Clean up conversational input
+  |> Pipeline.expand()      # Expand query with synonyms
+  |> Pipeline.decompose()   # Break into sub-questions
+  |> Pipeline.search()      # Search for each sub-question
+  |> Pipeline.reason()      # Multi-hop: search again if needed
+  |> Pipeline.rerank()      # Re-rank results
+  |> Pipeline.answer()      # Generate final answer
+  |> Pipeline.ground()      # Detect hallucinations
 
 ctx.answer
 ```
@@ -38,7 +53,7 @@ config :arcana,
 You can still override per-call if needed:
 
 ```elixir
-Agent.new("Question", repo: OtherRepo, llm: other_llm)
+Pipeline.new("Question", repo: OtherRepo, llm: other_llm)
 ```
 
 ## Pipeline Steps
@@ -49,10 +64,10 @@ Creates the context with your question and optional overrides:
 
 ```elixir
 # Uses config defaults
-ctx = Agent.new("What is Elixir?")
+ctx = Pipeline.new("What is Elixir?")
 
 # With explicit options
-ctx = Agent.new("What is Elixir?",
+ctx = Pipeline.new("What is Elixir?",
   repo: MyApp.Repo,
   llm: llm,
   limit: 5,        # Max chunks per search (default: 5)
@@ -65,7 +80,7 @@ ctx = Agent.new("What is Elixir?",
 Decide if the question needs retrieval or can be answered from knowledge:
 
 ```elixir
-ctx = Agent.gate(ctx)
+ctx = Pipeline.gate(ctx)
 
 ctx.skip_retrieval   # true if retrieval can be skipped
 ctx.gate_reasoning   # "Basic arithmetic can be answered from knowledge"
@@ -85,10 +100,10 @@ Use when:
 ```elixir
 # Example: skip retrieval for math questions
 ctx =
-  Agent.new("What is 2 + 2?", repo: MyApp.Repo, llm: llm)
-  |> Agent.gate()
-  |> Agent.search()
-  |> Agent.answer()
+  Pipeline.new("What is 2 + 2?", repo: MyApp.Repo, llm: llm)
+  |> Pipeline.gate()
+  |> Pipeline.search()
+  |> Pipeline.answer()
 
 ctx.skip_retrieval  # => true
 ctx.answer          # => "4" (answered from knowledge, no retrieval)
@@ -99,7 +114,7 @@ ctx.answer          # => "4" (answered from knowledge, no retrieval)
 Transform conversational input into clear search queries:
 
 ```elixir
-ctx = Agent.rewrite(ctx)
+ctx = Pipeline.rewrite(ctx)
 
 ctx.rewritten_query
 # "Hey, I want to compare Elixir and Go" → "compare Elixir and Go"
@@ -113,8 +128,8 @@ Route the question to specific collections based on content:
 
 ```elixir
 ctx
-|> Agent.select(collections: ["docs", "api", "tutorials"])
-|> Agent.search()
+|> Pipeline.select(collections: ["docs", "api", "tutorials"])
+|> Pipeline.search()
 ```
 
 The LLM decides which collection(s) are most relevant. Collection descriptions (if set) are included in the prompt.
@@ -124,7 +139,7 @@ The LLM decides which collection(s) are most relevant. Collection descriptions (
 Add synonyms and related terms to improve retrieval:
 
 ```elixir
-ctx = Agent.expand(ctx)
+ctx = Pipeline.expand(ctx)
 
 ctx.expanded_query
 # => "Elixir programming language functional BEAM Erlang VM"
@@ -135,7 +150,7 @@ ctx.expanded_query
 Break complex questions into simpler sub-questions:
 
 ```elixir
-ctx = Agent.decompose(ctx)
+ctx = Pipeline.decompose(ctx)
 
 ctx.sub_questions
 # => ["What is Elixir?", "What is Erlang?", "How do they compare?"]
@@ -146,7 +161,7 @@ ctx.sub_questions
 Search using the original question, expanded query, or sub-questions:
 
 ```elixir
-ctx = Agent.search(ctx)
+ctx = Pipeline.search(ctx)
 
 ctx.results
 # => [%{question: "...", collection: "...", chunks: [...]}]
@@ -159,13 +174,13 @@ Pass `:collection` or `:collections` to search specific collections without usin
 ```elixir
 # Search a single collection
 ctx
-|> Agent.search(collection: "technical_docs")
-|> Agent.answer()
+|> Pipeline.search(collection: "technical_docs")
+|> Pipeline.answer()
 
 # Search multiple collections
 ctx
-|> Agent.search(collections: ["docs", "faq"])
-|> Agent.answer()
+|> Pipeline.search(collections: ["docs", "faq"])
+|> Pipeline.answer()
 ```
 
 Collection selection priority:
@@ -183,7 +198,7 @@ This is useful when:
 Evaluate if search results are sufficient and search again if not:
 
 ```elixir
-ctx = Agent.reason(ctx, max_iterations: 2)
+ctx = Pipeline.reason(ctx, max_iterations: 2)
 
 ctx.reason_iterations  # Number of additional searches performed
 ctx.queries_tried      # MapSet of all queries attempted
@@ -208,10 +223,10 @@ The `queries_tried` set prevents searching the same query twice.
 ```elixir
 # Question that may need multiple searches
 ctx =
-  Agent.new("How does Elixir handle concurrency and error recovery?")
-  |> Agent.search()
-  |> Agent.reason(max_iterations: 3)
-  |> Agent.answer()
+  Pipeline.new("How does Elixir handle concurrency and error recovery?")
+  |> Pipeline.search()
+  |> Pipeline.reason(max_iterations: 3)
+  |> Pipeline.answer()
 
 # First search finds concurrency info, reason/2 adds error recovery search
 ctx.reason_iterations  # => 1
@@ -223,7 +238,7 @@ ctx.queries_tried      # => MapSet.new(["How does Elixir...", "Elixir error reco
 Score and filter chunks by relevance:
 
 ```elixir
-ctx = Agent.rerank(ctx, threshold: 7)
+ctx = Pipeline.rerank(ctx, threshold: 7)
 ```
 
 See the [Re-ranking Guide](reranking.md) for details.
@@ -233,7 +248,7 @@ See the [Re-ranking Guide](reranking.md) for details.
 Generate the final answer from retrieved context:
 
 ```elixir
-ctx = Agent.answer(ctx)
+ctx = Pipeline.answer(ctx)
 
 ctx.answer
 # => "Elixir is a functional programming language..."
@@ -245,10 +260,10 @@ When `skip_retrieval` is true (set by `gate/2`), `answer/2` uses a no-context pr
 
 ```elixir
 ctx =
-  Agent.new("What is 2 + 2?")
-  |> Agent.gate()    # Sets skip_retrieval: true
-  |> Agent.search()  # Skipped
-  |> Agent.answer()  # Answers from knowledge
+  Pipeline.new("What is 2 + 2?")
+  |> Pipeline.gate()    # Sets skip_retrieval: true
+  |> Pipeline.search()  # Skipped
+  |> Pipeline.answer()  # Answers from knowledge
 
 ctx.answer       # => "4"
 ctx.context_used # => []
@@ -259,7 +274,7 @@ ctx.context_used # => []
 Check if the generated answer is faithful to the retrieved context:
 
 ```elixir
-ctx = Agent.ground(ctx)
+ctx = Pipeline.ground(ctx)
 
 ctx.grounding.score              # 0.0-1.0 (fraction of faithful tokens)
 ctx.grounding.hallucinated_spans # [%{text: "...", start: 0, end: 10, score: 0.95, sources: [...]}]
@@ -330,17 +345,17 @@ Every LLM-powered step accepts a custom prompt function and optional LLM overrid
 
 ```elixir
 # Custom rewrite prompt
-Agent.rewrite(ctx, prompt: fn question ->
+Pipeline.rewrite(ctx, prompt: fn question ->
   "Clean up this conversational input: #{question}"
 end)
 
 # Custom expansion prompt
-Agent.expand(ctx, prompt: fn question ->
+Pipeline.expand(ctx, prompt: fn question ->
   "Expand this query for better search: #{question}"
 end)
 
 # Custom decomposition prompt
-Agent.decompose(ctx, prompt: fn question ->
+Pipeline.decompose(ctx, prompt: fn question ->
   """
   Split this into sub-questions. Return JSON:
   {"sub_questions": ["q1", "q2"]}
@@ -350,7 +365,7 @@ Agent.decompose(ctx, prompt: fn question ->
 end)
 
 # Custom answer prompt
-Agent.answer(ctx, prompt: fn question, chunks ->
+Pipeline.answer(ctx, prompt: fn question, chunks ->
   context = Enum.map_join(chunks, "\n", & &1.text)
   """
   Answer based only on this context:
@@ -361,8 +376,8 @@ Agent.answer(ctx, prompt: fn question, chunks ->
 end)
 
 # Override LLM for a specific step
-Agent.rewrite(ctx, llm: faster_llm)
-Agent.answer(ctx, llm: more_capable_llm)
+Pipeline.rewrite(ctx, llm: faster_llm)
+Pipeline.answer(ctx, llm: more_capable_llm)
 ```
 
 ## Error Handling
@@ -370,9 +385,9 @@ Agent.answer(ctx, llm: more_capable_llm)
 Errors are stored in the context and propagate through the pipeline:
 
 ```elixir
-ctx = Agent.new("Question", repo: repo, llm: llm)
-  |> Agent.search()
-  |> Agent.answer()
+ctx = Pipeline.new("Question", repo: repo, llm: llm)
+  |> Pipeline.search()
+  |> Pipeline.answer()
 
 case ctx.error do
   nil -> IO.puts("Answer: #{ctx.answer}")
@@ -384,27 +399,26 @@ Steps skip execution when an error is present.
 
 ## Telemetry
 
-Each step emits telemetry events:
+Each step emits a `:telemetry.span` under `[:arcana, :pipeline, ...]`. The events were previously emitted under `[:arcana, :agent, ...]`; that prefix was renamed to `:pipeline` along with the module rename and is **no longer emitted**. Update any existing handlers.
 
 ```elixir
-# Available events
-[:arcana, :agent, :rewrite, :start | :stop | :exception]
-[:arcana, :agent, :select, :start | :stop | :exception]
-[:arcana, :agent, :expand, :start | :stop | :exception]
-[:arcana, :agent, :decompose, :start | :stop | :exception]
-[:arcana, :agent, :search, :start | :stop | :exception]
-[:arcana, :agent, :rerank, :start | :stop | :exception]
-[:arcana, :agent, :answer, :start | :stop | :exception]
-[:arcana, :agent, :ground, :start | :stop | :exception]
-[:arcana, :agent, :self_correct, :start | :stop | :exception]  # Per correction attempt
+[:arcana, :pipeline, :rewrite, :start | :stop | :exception]
+[:arcana, :pipeline, :select, :start | :stop | :exception]
+[:arcana, :pipeline, :expand, :start | :stop | :exception]
+[:arcana, :pipeline, :decompose, :start | :stop | :exception]
+[:arcana, :pipeline, :search, :start | :stop | :exception]
+[:arcana, :pipeline, :rerank, :start | :stop | :exception]
+[:arcana, :pipeline, :answer, :start | :stop | :exception]
+[:arcana, :pipeline, :ground, :start | :stop | :exception]
+[:arcana, :pipeline, :self_correct, :start | :stop | :exception]  # per correction attempt
 ```
 
 Example handler:
 
 ```elixir
 :telemetry.attach(
-  "agent-logger",
-  [:arcana, :agent, :search, :stop],
+  "pipeline-logger",
+  [:arcana, :pipeline, :search, :stop],
   fn _event, measurements, metadata, _config ->
     IO.puts("Search found #{metadata.total_chunks} chunks in #{measurements.duration}ns")
   end,
@@ -418,51 +432,51 @@ Example handler:
 
 ```elixir
 ctx =
-  Agent.new(question, repo: repo, llm: llm)
-  |> Agent.search()
-  |> Agent.answer()
+  Pipeline.new(question, repo: repo, llm: llm)
+  |> Pipeline.search()
+  |> Pipeline.answer()
 ```
 
 ### With Query Expansion
 
 ```elixir
 ctx =
-  Agent.new(question, repo: repo, llm: llm)
-  |> Agent.expand()
-  |> Agent.search()
-  |> Agent.answer()
+  Pipeline.new(question, repo: repo, llm: llm)
+  |> Pipeline.expand()
+  |> Pipeline.search()
+  |> Pipeline.answer()
 ```
 
 ### Full Pipeline
 
 ```elixir
 ctx =
-  Agent.new(question, repo: repo, llm: llm)
-  |> Agent.select(collections: ["docs", "api"])
-  |> Agent.expand()
-  |> Agent.decompose()
-  |> Agent.search()
-  |> Agent.rerank(threshold: 7)
-  |> Agent.answer(self_correct: true)
-  |> Agent.ground()
+  Pipeline.new(question, repo: repo, llm: llm)
+  |> Pipeline.select(collections: ["docs", "api"])
+  |> Pipeline.expand()
+  |> Pipeline.decompose()
+  |> Pipeline.search()
+  |> Pipeline.rerank(threshold: 7)
+  |> Pipeline.answer(self_correct: true)
+  |> Pipeline.ground()
 ```
 
 ### Conditional Steps
 
 ```elixir
-ctx = Agent.new(question, repo: repo, llm: llm)
+ctx = Pipeline.new(question, repo: repo, llm: llm)
 
 ctx =
   if complex_question?(question) do
-    ctx |> Agent.decompose()
+    ctx |> Pipeline.decompose()
   else
-    ctx |> Agent.expand()
+    ctx |> Pipeline.expand()
   end
 
 ctx
-|> Agent.search()
-|> Agent.rerank()
-|> Agent.answer()
+|> Pipeline.search()
+|> Pipeline.rerank()
+|> Pipeline.answer()
 ```
 
 ## Custom Implementations
@@ -477,10 +491,10 @@ Every pipeline step has a behaviour and can be replaced with a custom implementa
 | `select/2` | `Arcana.Pipeline.Selector` | `Selector.LLM` | `:selector` |
 | `expand/2` | `Arcana.Pipeline.Expander` | `Expander.LLM` | `:expander` |
 | `decompose/2` | `Arcana.Pipeline.Decomposer` | `Decomposer.LLM` | `:decomposer` |
-| `search/2` | `Arcana.Pipeline.Searcher` | `Searcher.Arcana` | `:searcher` |
-| `rerank/2` | `Arcana.Pipeline.Reranker` | `Reranker.LLM` | `:reranker` |
+| `search/2` | `Arcana.Searcher` | `Searcher.Arcana` | `:searcher` |
+| `rerank/2` | `Arcana.Reranker` | `Reranker.LLM` | `:reranker` |
 | `answer/2` | `Arcana.Pipeline.Answerer` | `Answerer.LLM` | `:answerer` |
-| `ground/2` | `Arcana.Pipeline.Grounder` | `Grounder.Hallmark` | `:grounder` |
+| `ground/2` | `Arcana.Grounder` | `Grounder.Hallmark` | `:grounder` |
 
 ### Custom Rewriter
 
@@ -497,8 +511,8 @@ defmodule MyApp.SpellCheckRewriter do
 end
 
 ctx
-|> Agent.rewrite(rewriter: MyApp.SpellCheckRewriter)
-|> Agent.search()
+|> Pipeline.rewrite(rewriter: MyApp.SpellCheckRewriter)
+|> Pipeline.search()
 ```
 
 ### Custom Expander
@@ -516,7 +530,7 @@ defmodule MyApp.MedicalExpander do
   end
 end
 
-Agent.expand(ctx, expander: MyApp.MedicalExpander)
+Pipeline.expand(ctx, expander: MyApp.MedicalExpander)
 ```
 
 ### Custom Decomposer
@@ -538,7 +552,7 @@ defmodule MyApp.SimpleDecomposer do
   end
 end
 
-Agent.decompose(ctx, decomposer: MyApp.SimpleDecomposer)
+Pipeline.decompose(ctx, decomposer: MyApp.SimpleDecomposer)
 ```
 
 ### Custom Searcher
@@ -547,7 +561,7 @@ Replace the default pgvector search with any backend:
 
 ```elixir
 defmodule MyApp.ElasticsearchSearcher do
-  @behaviour Arcana.Pipeline.Searcher
+  @behaviour Arcana.Searcher
 
   @impl true
   def search(question, collection, opts) do
@@ -570,8 +584,8 @@ end
 
 # Use Elasticsearch instead of pgvector
 ctx
-|> Agent.search(searcher: MyApp.ElasticsearchSearcher)
-|> Agent.answer()
+|> Pipeline.search(searcher: MyApp.ElasticsearchSearcher)
+|> Pipeline.answer()
 ```
 
 Other search backend examples:
@@ -586,7 +600,7 @@ Use a cross-encoder or other scoring model:
 
 ```elixir
 defmodule MyApp.CrossEncoderReranker do
-  @behaviour Arcana.Pipeline.Reranker
+  @behaviour Arcana.Reranker
 
   @impl true
   def rerank(question, chunks, opts) do
@@ -605,7 +619,7 @@ defmodule MyApp.CrossEncoderReranker do
   end
 end
 
-Agent.rerank(ctx, reranker: MyApp.CrossEncoderReranker)
+Pipeline.rerank(ctx, reranker: MyApp.CrossEncoderReranker)
 ```
 
 ### Custom Answerer
@@ -634,7 +648,7 @@ defmodule MyApp.TemplateAnswerer do
 end
 
 # Skip LLM entirely, just concatenate chunks
-Agent.answer(ctx, answerer: MyApp.TemplateAnswerer)
+Pipeline.answer(ctx, answerer: MyApp.TemplateAnswerer)
 ```
 
 ### Custom Grounder
@@ -643,7 +657,7 @@ Replace the default Hallmark grounder with your own hallucination detection logi
 
 ```elixir
 defmodule MyApp.APIGrounder do
-  @behaviour Arcana.Pipeline.Grounder
+  @behaviour Arcana.Grounder
 
   @impl true
   def ground(answer, chunks, opts) do
@@ -657,7 +671,7 @@ defmodule MyApp.APIGrounder do
   end
 end
 
-Agent.ground(ctx, grounder: MyApp.APIGrounder)
+Pipeline.ground(ctx, grounder: MyApp.APIGrounder)
 ```
 
 ### Inline Functions
@@ -666,28 +680,28 @@ For quick customizations, pass a function instead of a module:
 
 ```elixir
 # Inline rewriter
-Agent.rewrite(ctx, rewriter: fn question, _opts ->
+Pipeline.rewrite(ctx, rewriter: fn question, _opts ->
   {:ok, String.downcase(question)}
 end)
 
 # Inline expander
-Agent.expand(ctx, expander: fn question, _opts ->
+Pipeline.expand(ctx, expander: fn question, _opts ->
   {:ok, question <> " programming language"}
 end)
 
 # Inline searcher
-Agent.search(ctx, searcher: fn question, collection, opts ->
+Pipeline.search(ctx, searcher: fn question, collection, opts ->
   # Your search logic
   {:ok, chunks}
 end)
 
 # Inline answerer
-Agent.answer(ctx, answerer: fn question, chunks, _opts ->
+Pipeline.answer(ctx, answerer: fn question, chunks, _opts ->
   {:ok, "Found #{length(chunks)} relevant chunks for: #{question}"}
 end)
 
 # Inline grounder
-Agent.ground(ctx, grounder: fn answer, chunks, _opts ->
+Pipeline.ground(ctx, grounder: fn answer, chunks, _opts ->
   {:ok, %Arcana.Grounding.Result{score: 1.0, hallucinated_spans: [], token_labels: []}}
 end)
 ```
@@ -698,12 +712,12 @@ Mix and match custom components:
 
 ```elixir
 ctx =
-  Agent.new(question, repo: repo, llm: llm)
-  |> Agent.rewrite(rewriter: MyApp.SpellCheckRewriter)
-  |> Agent.expand()  # Use default LLM expander
-  |> Agent.search(searcher: MyApp.ElasticsearchSearcher)
-  |> Agent.rerank(reranker: MyApp.CrossEncoderReranker)
-  |> Agent.answer()  # Use default LLM answerer
+  Pipeline.new(question, repo: repo, llm: llm)
+  |> Pipeline.rewrite(rewriter: MyApp.SpellCheckRewriter)
+  |> Pipeline.expand()  # Use default LLM expander
+  |> Pipeline.search(searcher: MyApp.ElasticsearchSearcher)
+  |> Pipeline.rerank(reranker: MyApp.CrossEncoderReranker)
+  |> Pipeline.answer()  # Use default LLM answerer
 ```
 
 ### Per-Step LLM Override
@@ -715,11 +729,11 @@ fast_llm = fn prompt -> {:ok, OpenAI.chat("gpt-4o-mini", prompt)} end
 smart_llm = fn prompt -> {:ok, OpenAI.chat("gpt-4o", prompt)} end
 
 ctx =
-  Agent.new(question, repo: repo, llm: fast_llm)
-  |> Agent.expand()  # Uses fast_llm
-  |> Agent.search()
-  |> Agent.rerank()  # Uses fast_llm
-  |> Agent.answer(llm: smart_llm)  # Override with smart_llm
+  Pipeline.new(question, repo: repo, llm: fast_llm)
+  |> Pipeline.expand()  # Uses fast_llm
+  |> Pipeline.search()
+  |> Pipeline.rerank()  # Uses fast_llm
+  |> Pipeline.answer(llm: smart_llm)  # Override with smart_llm
 ```
 
 ## Context Struct

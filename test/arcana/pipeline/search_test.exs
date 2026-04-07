@@ -189,7 +189,7 @@ defmodule Arcana.Pipeline.SearchTest do
   describe "custom searcher" do
     test "accepts custom searcher module" do
       defmodule TestSearcher do
-        @behaviour Arcana.Pipeline.Searcher
+        @behaviour Arcana.Searcher
 
         @impl true
         def search(_question, _collection, _opts) do

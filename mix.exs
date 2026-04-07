@@ -36,9 +36,11 @@ defmodule Arcana.MixProject do
         "README.md",
         "guides/getting-started.md",
         "guides/llm-integration.md",
-        "guides/agentic-rag.md",
-        "guides/reranking.md",
+        "guides/pipeline.md",
+        "guides/loop.md",
+        "guides/graphrag.md",
         "guides/search-algorithms.md",
+        "guides/reranking.md",
         "guides/evaluation.md",
         "guides/telemetry.md",
         "guides/dashboard.md"

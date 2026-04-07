@@ -185,8 +185,8 @@ defmodule Arcana.Pipeline.ReasonTest do
       :telemetry.attach_many(
         ref,
         [
-          [:arcana, :agent, :reason, :start],
-          [:arcana, :agent, :reason, :stop]
+          [:arcana, :pipeline, :reason, :start],
+          [:arcana, :pipeline, :reason, :stop]
         ],
         fn event, measurements, metadata, _ ->
           send(test_pid, {:telemetry, event, measurements, metadata})
@@ -210,8 +210,8 @@ defmodule Arcana.Pipeline.ReasonTest do
 
       Pipeline.reason(ctx)
 
-      assert_receive {:telemetry, [:arcana, :agent, :reason, :start], _, %{question: "test"}}
-      assert_receive {:telemetry, [:arcana, :agent, :reason, :stop], _, %{iterations: 0}}
+      assert_receive {:telemetry, [:arcana, :pipeline, :reason, :start], _, %{question: "test"}}
+      assert_receive {:telemetry, [:arcana, :pipeline, :reason, :stop], _, %{iterations: 0}}
 
       :telemetry.detach(ref)
     end

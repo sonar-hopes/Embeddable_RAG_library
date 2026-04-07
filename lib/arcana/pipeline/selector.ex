@@ -1,6 +1,6 @@
 defmodule Arcana.Pipeline.Selector do
   @moduledoc """
-  Behaviour for collection selection in the Agent pipeline.
+  Behaviour for collection selection in `Arcana.Pipeline`.
 
   The selector determines which collections to search based on the question
   and available collections. This allows for both LLM-based routing (default)

@@ -1,4 +1,4 @@
-defmodule Arcana.Pipeline.Reranker.CrossEncoder do
+defmodule Arcana.Reranker.CrossEncoder do
   @moduledoc """
   Local cross-encoder reranker using Bumblebee.
 
@@ -8,14 +8,14 @@ defmodule Arcana.Pipeline.Reranker.CrossEncoder do
 
   ## Usage
 
-      # In Agent pipeline
+      # In Arcana.Pipeline
       ctx
       |> Pipeline.search()
-      |> Pipeline.rerank(reranker: Arcana.Pipeline.Reranker.CrossEncoder)
+      |> Pipeline.rerank(reranker: Arcana.Reranker.CrossEncoder)
       |> Pipeline.answer()
 
       # Directly
-      {:ok, reranked} = Arcana.Pipeline.Reranker.CrossEncoder.rerank(
+      {:ok, reranked} = Arcana.Reranker.CrossEncoder.rerank(
         "What is Elixir?",
         chunks,
         threshold: 0.0
@@ -26,7 +26,7 @@ defmodule Arcana.Pipeline.Reranker.CrossEncoder do
   The serving must be started in your supervision tree:
 
       children = [
-        {Arcana.Pipeline.Reranker.CrossEncoder, model: "cross-encoder/ms-marco-MiniLM-L-6-v2"}
+        {Arcana.Reranker.CrossEncoder, model: "cross-encoder/ms-marco-MiniLM-L-6-v2"}
       ]
 
   ## Options
@@ -36,7 +36,7 @@ defmodule Arcana.Pipeline.Reranker.CrossEncoder do
     - `:top_k` - Keep top N results regardless of threshold (overrides threshold)
   """
 
-  @behaviour Arcana.Pipeline.Reranker
+  @behaviour Arcana.Reranker
 
   use GenServer
 
@@ -58,7 +58,7 @@ defmodule Arcana.Pipeline.Reranker.CrossEncoder do
     {:ok, %{model: model_info, tokenizer: tokenizer}}
   end
 
-  @impl Arcana.Pipeline.Reranker
+  @impl Arcana.Reranker
   def rerank(_question, [], _opts), do: {:ok, []}
 
   def rerank(question, chunks, opts) do

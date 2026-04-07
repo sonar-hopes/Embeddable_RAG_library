@@ -77,8 +77,8 @@ defmodule Arcana.Pipeline.ExpandTest do
       :telemetry.attach_many(
         ref,
         [
-          [:arcana, :agent, :expand, :start],
-          [:arcana, :agent, :expand, :stop]
+          [:arcana, :pipeline, :expand, :start],
+          [:arcana, :pipeline, :expand, :stop]
         ],
         fn event, measurements, metadata, _ ->
           send(test_pid, {:telemetry, event, measurements, metadata})
@@ -93,10 +93,10 @@ defmodule Arcana.Pipeline.ExpandTest do
       Pipeline.new("original query", repo: Arcana.TestRepo, llm: llm)
       |> Pipeline.expand()
 
-      assert_receive {:telemetry, [:arcana, :agent, :expand, :start], _, start_meta}
+      assert_receive {:telemetry, [:arcana, :pipeline, :expand, :start], _, start_meta}
       assert start_meta.question == "original query"
 
-      assert_receive {:telemetry, [:arcana, :agent, :expand, :stop], _, stop_meta}
+      assert_receive {:telemetry, [:arcana, :pipeline, :expand, :stop], _, stop_meta}
       assert stop_meta.expanded_query == "expanded query terms"
 
       :telemetry.detach(ref)

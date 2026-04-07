@@ -266,8 +266,8 @@ defmodule Arcana.Pipeline.AnswerTest do
       :telemetry.attach_many(
         ref,
         [
-          [:arcana, :agent, :self_correct, :start],
-          [:arcana, :agent, :self_correct, :stop]
+          [:arcana, :pipeline, :self_correct, :start],
+          [:arcana, :pipeline, :self_correct, :stop]
         ],
         fn event, measurements, metadata, _ ->
           send(test_pid, {:telemetry, event, measurements, metadata})
@@ -298,9 +298,9 @@ defmodule Arcana.Pipeline.AnswerTest do
 
       Pipeline.answer(ctx, self_correct: true)
 
-      assert_receive {:telemetry, [:arcana, :agent, :self_correct, :start], _, %{attempt: 1}}
+      assert_receive {:telemetry, [:arcana, :pipeline, :self_correct, :start], _, %{attempt: 1}}
 
-      assert_receive {:telemetry, [:arcana, :agent, :self_correct, :stop], _,
+      assert_receive {:telemetry, [:arcana, :pipeline, :self_correct, :stop], _,
                       %{result: :accepted}}
 
       :telemetry.detach(ref)
