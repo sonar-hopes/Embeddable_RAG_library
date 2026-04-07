@@ -1385,6 +1385,484 @@ defmodule ArcanaWeb.Assets do
     cursor: not-allowed;
   }
 
+  /* Ask page sub-tabs: segmented pill control. Distinct from the
+     top-level .arcana-tab nav (which uses underlines) so the two
+     navigation levels don't visually compete. */
+  .arcana-ask-sub-tab-nav {
+    display: inline-flex;
+    align-items: center;
+    background: #f3f4f6;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.5rem;
+    padding: 0.25rem;
+    gap: 0.125rem;
+    margin: 1rem 0 0.75rem;
+  }
+
+  .arcana-ask-sub-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 36px;
+    padding: 0.5rem 1.25rem;
+    border: none;
+    background: transparent;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #6b7280;
+    cursor: pointer;
+    border-radius: 0.375rem;
+    transition: all 0.15s ease;
+  }
+
+  .arcana-ask-sub-tab:hover:not(.active) {
+    color: #4b5563;
+    background: rgba(255, 255, 255, 0.6);
+  }
+
+  .arcana-ask-sub-tab.active {
+    background: #ffffff;
+    color: #6d28d9;
+    font-weight: 600;
+    box-shadow:
+      0 1px 2px rgba(15, 23, 42, 0.06),
+      0 1px 3px rgba(15, 23, 42, 0.04);
+  }
+
+  .arcana-sub-tab-description {
+    color: #6b7280;
+    font-size: 0.875rem;
+    margin: 0 0 1.25rem 0;
+    line-height: 1.5;
+  }
+
+  /* Loop settings: card grid that mirrors the .arcana-pipeline-step
+     visual language so the Loop sub-tab feels like part of the same
+     surface as the Pipeline sub-tab. */
+  .arcana-loop-settings {
+    margin-top: 1rem;
+  }
+
+  .arcana-loop-settings h4 {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 0 0 0.75rem 0;
+  }
+
+  .arcana-loop-settings-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+  }
+
+  .arcana-loop-setting {
+    display: flex;
+    flex-direction: column;
+    padding: 0.875rem 1rem;
+    background: #fafafa;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.5rem;
+    gap: 0.25rem;
+    transition: border-color 0.15s ease;
+  }
+
+  .arcana-loop-setting:hover {
+    border-color: #d1d5db;
+  }
+
+  .arcana-loop-setting label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #374151;
+  }
+
+  .arcana-loop-setting > small {
+    font-size: 0.75rem;
+    color: #6b7280;
+    line-height: 1.4;
+  }
+
+  .arcana-loop-setting code {
+    font-size: 0.7rem;
+    background: #ede9fe;
+    color: #6d28d9;
+    padding: 0.0625rem 0.375rem;
+    border-radius: 0.25rem;
+  }
+
+  .arcana-loop-setting--info {
+    background: #f5f3ff;
+    border-color: #ddd6fe;
+  }
+
+  .arcana-loop-setting--info:hover {
+    border-color: #c4b5fd;
+  }
+
+  .arcana-loop-setting-value {
+    margin-top: 0.375rem;
+    font-size: 0.75rem;
+    color: #6d28d9;
+    font-family:
+      ui-monospace, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  }
+
+  .arcana-loop-setting input[type="number"] {
+    margin-top: 0.5rem;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #d1d5db;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    background: white;
+    color: #111827;
+    box-sizing: border-box;
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease;
+  }
+
+  .arcana-loop-setting input[type="number"]:focus {
+    outline: none;
+    border-color: #7c3aed;
+    box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+  }
+
+  .arcana-loop-setting input[type="number"]:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .arcana-loop-setting--toggle {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.875rem 1rem;
+    cursor: pointer;
+  }
+
+  .arcana-loop-setting--toggle:has(input:checked) {
+    background: #ede9fe;
+    border-color: #7c3aed;
+  }
+
+  .arcana-loop-setting--toggle:has(input:checked) .arcana-loop-toggle-label {
+    color: #6d28d9;
+  }
+
+  .arcana-loop-setting--toggle input[type="checkbox"] {
+    margin: 0.125rem 0 0 0;
+    width: 16px;
+    height: 16px;
+    accent-color: #7c3aed;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .arcana-loop-toggle-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+
+  .arcana-loop-toggle-label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #374151;
+  }
+
+  .arcana-loop-toggle-content small {
+    font-size: 0.75rem;
+    color: #6b7280;
+    line-height: 1.4;
+  }
+
+  /* Loop trace: shared visual language for both the live (during run)
+     and the static (post run) tool history. The live variant adds a
+     pulsing header and a slide-in animation on each new entry. */
+  .arcana-loop-trace,
+  .arcana-loop-live-trace {
+    margin-top: 1rem;
+    background: #fafafa;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.5rem;
+    padding: 1rem 1.25rem;
+  }
+
+  .arcana-loop-live-trace {
+    background: linear-gradient(180deg, #faf5ff 0%, #fafafa 100%);
+    border-color: #ddd6fe;
+  }
+
+  .arcana-loop-trace h4 {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 0 0 0.875rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+  }
+
+  .arcana-loop-meta {
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: #9ca3af;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  .arcana-loop-meta code {
+    font-size: 0.6875rem;
+    background: #ede9fe;
+    color: #6d28d9;
+    padding: 0.0625rem 0.375rem;
+    border-radius: 0.25rem;
+  }
+
+  .arcana-loop-live-header {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #6d28d9;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.875rem;
+  }
+
+  .arcana-loop-live-pulse {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #7c3aed;
+    box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.6);
+    animation: arcana-loop-pulse 1.6s ease-out infinite;
+  }
+
+  @keyframes arcana-loop-pulse {
+    0% {
+      box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.6);
+    }
+    70% {
+      box-shadow: 0 0 0 8px rgba(124, 58, 237, 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(124, 58, 237, 0);
+    }
+  }
+
+  .arcana-loop-live-title {
+    flex: 1;
+  }
+
+  .arcana-loop-live-count {
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: #9ca3af;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  .arcana-loop-live-empty {
+    font-size: 0.8125rem;
+    color: #9ca3af;
+    font-style: italic;
+    padding: 0.5rem 0 0.25rem;
+  }
+
+  .arcana-loop-iterations {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    position: relative;
+  }
+
+  /* Vertical timeline rail running down the left side of the iteration
+     list. Anchored to the iter-num badge so the rail aligns with the
+     center of each badge. */
+  .arcana-loop-iterations::before {
+    content: '';
+    position: absolute;
+    left: 0.875rem;
+    top: 0.75rem;
+    bottom: 0.75rem;
+    width: 2px;
+    background: #e5e7eb;
+    border-radius: 1px;
+  }
+
+  .arcana-loop-iterations--live::before {
+    background: linear-gradient(180deg, #c4b5fd 0%, #ddd6fe 100%);
+  }
+
+  .arcana-loop-iteration {
+    position: relative;
+    padding: 0.625rem 0 0.625rem 2.25rem;
+    animation: arcana-loop-fade-in 0.35s ease-out both;
+  }
+
+  @keyframes arcana-loop-fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .arcana-loop-iter-header {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    flex-wrap: wrap;
+  }
+
+  .arcana-loop-iter-num {
+    position: absolute;
+    left: 0;
+    top: 0.5rem;
+    width: 1.75rem;
+    height: 1.75rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: white;
+    border: 2px solid #e5e7eb;
+    border-radius: 50%;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: #6b7280;
+    z-index: 1;
+  }
+
+  .arcana-loop-iterations--live .arcana-loop-iter-num {
+    border-color: #c4b5fd;
+    color: #6d28d9;
+  }
+
+  /* Per-tool color coding so search vs answer vs give_up is scannable */
+  .arcana-tool-search .arcana-loop-iter-num {
+    border-color: #93c5fd;
+    color: #1d4ed8;
+    background: #eff6ff;
+  }
+
+  .arcana-tool-answer .arcana-loop-iter-num {
+    border-color: #86efac;
+    color: #15803d;
+    background: #f0fdf4;
+  }
+
+  .arcana-tool-give_up .arcana-loop-iter-num {
+    border-color: #fca5a5;
+    color: #b91c1c;
+    background: #fef2f2;
+  }
+
+  .arcana-loop-tool {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    font-family:
+      ui-monospace, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    padding: 0.125rem 0.5rem;
+    border-radius: 0.25rem;
+    background: #f3f4f6;
+    color: #374151;
+  }
+
+  .arcana-tool-search .arcana-loop-tool {
+    background: #dbeafe;
+    color: #1d4ed8;
+  }
+
+  .arcana-tool-answer .arcana-loop-tool {
+    background: #dcfce7;
+    color: #15803d;
+  }
+
+  .arcana-tool-give_up .arcana-loop-tool {
+    background: #fee2e2;
+    color: #b91c1c;
+  }
+
+  /* Pipeline step trace: same visual language as the loop trace, but
+     each entry is a "step" with a running/done state instead of a
+     completed tool call. The number badge contains a tiny spinner
+     while running, then becomes a step number when done. */
+  .arcana-pipeline-iterations::before {
+    background: linear-gradient(180deg, #c4b5fd 0%, #ddd6fe 100%);
+  }
+
+  .arcana-pipeline-step-trace--running .arcana-loop-iter-num {
+    background: #f5f3ff;
+    border-color: #c4b5fd;
+    color: #6d28d9;
+  }
+
+  .arcana-pipeline-step-trace--running .arcana-loop-tool {
+    background: #ede9fe;
+    color: #6d28d9;
+  }
+
+  .arcana-pipeline-step-trace--done .arcana-loop-iter-num {
+    background: #f0fdf4;
+    border-color: #86efac;
+    color: #15803d;
+  }
+
+  .arcana-pipeline-step-trace--done .arcana-loop-tool {
+    background: #dcfce7;
+    color: #15803d;
+  }
+
+  .arcana-pipeline-step-spinner {
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: 50%;
+    border: 2px solid rgba(124, 58, 237, 0.25);
+    border-top-color: #7c3aed;
+    animation: arcana-pipeline-spin 0.8s linear infinite;
+  }
+
+  @keyframes arcana-pipeline-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .arcana-loop-args {
+    font-size: 0.8125rem;
+    color: #4b5563;
+    font-family:
+      ui-monospace, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .arcana-loop-chunk-count {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: #6d28d9;
+    background: #ede9fe;
+    padding: 0.125rem 0.5rem;
+    border-radius: 999px;
+    flex-shrink: 0;
+  }
+
   .arcana-checkbox-label {
     display: flex;
     flex-direction: column;

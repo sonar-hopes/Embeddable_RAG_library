@@ -34,7 +34,9 @@ defmodule ArcanaWeb.AskLive do
        graph_context_expanded: true,
        llm_select: false,
        pipeline_step: nil,
-       pipeline_steps: Map.new(@pipeline_step_keys, &{&1, false})
+       pipeline_steps: Map.new(@pipeline_step_keys, &{&1, false}),
+       loop_live_history: [],
+       trace_history: []
      )}
   end
 
@@ -66,7 +68,13 @@ defmodule ArcanaWeb.AskLive do
   defp maybe_reset_ask_state(socket, false), do: socket
 
   defp maybe_reset_ask_state(socket, true) do
-    assign(socket, ask_context: nil, ask_error: nil, pipeline_step: nil)
+    assign(socket,
+      ask_context: nil,
+      ask_error: nil,
+      pipeline_step: nil,
+      loop_live_history: [],
+      trace_history: []
+    )
   end
 
   defp parse_sub_tab("advanced"), do: :advanced
@@ -126,14 +134,30 @@ defmodule ArcanaWeb.AskLive do
         {:noreply, assign(socket, ask_error: "Please enter a question")}
 
       {llm, question} ->
-        socket = assign(socket, ask_running: true, ask_error: nil, ask_question: question)
+        socket =
+          assign(socket,
+            ask_running: true,
+            ask_error: nil,
+            ask_question: question,
+            ask_context: nil,
+            loop_live_history: [],
+            trace_history: []
+          )
+
         start_ask_task(socket, params, llm, question)
         {:noreply, socket}
     end
   end
 
   def handle_event("ask_clear", _params, socket) do
-    {:noreply, assign(socket, ask_context: nil, ask_error: nil, ask_question: "")}
+    {:noreply,
+     assign(socket,
+       ask_context: nil,
+       ask_error: nil,
+       ask_question: "",
+       loop_live_history: [],
+       trace_history: []
+     )}
   end
 
   def handle_event("ask_switch_sub_tab", %{"sub_tab" => sub_tab}, socket) do
@@ -146,7 +170,17 @@ defmodule ArcanaWeb.AskLive do
   def handle_event("form_changed", params, socket) do
     selected = params["collections"] || []
     pipeline_steps = Map.new(@pipeline_step_keys, &{&1, params[&1] == "true"})
-    {:noreply, assign(socket, selected_collections: selected, pipeline_steps: pipeline_steps)}
+    # Carry the textarea content forward on every form-change so a
+    # checkbox click (collections, pipeline steps) doesn't blow away
+    # what the user typed in the question box.
+    question = params["question"] || socket.assigns.ask_question
+
+    {:noreply,
+     assign(socket,
+       selected_collections: selected,
+       pipeline_steps: pipeline_steps,
+       ask_question: question
+     )}
   end
 
   def handle_event("toggle_graph_context", _params, socket) do
@@ -167,6 +201,33 @@ defmodule ArcanaWeb.AskLive do
   defp ask_loading_label(:loop, _step), do: "Running agent loop..."
   defp ask_loading_label(:pipeline, step), do: step || "Running pipeline..."
 
+  # Resolves which LLM each role uses, mirroring the lookup chain inside
+  # Arcana.Loop.run/2:
+  #   controller_llm = config :arcana, :loop, :controller_llm || :arcana, :llm
+  #   answer_llm     = config :arcana, :loop, :answer_llm (nil → uses controller text)
+  #   fallback       = answer_llm || controller_llm
+  defp loop_llm_roles do
+    loop_opts = Application.get_env(:arcana, :loop, [])
+    base_llm = Application.get_env(:arcana, :llm)
+
+    controller = Keyword.get(loop_opts, :controller_llm) || base_llm
+    answer = Keyword.get(loop_opts, :answer_llm)
+
+    %{
+      controller: format_llm_spec(controller),
+      answer: format_llm_spec(answer),
+      fallback: format_llm_spec(answer || controller)
+    }
+  end
+
+  defp format_llm_spec(nil), do: nil
+  defp format_llm_spec(fun) when is_function(fun), do: "<function/1>"
+  defp format_llm_spec({model, _opts}) when is_binary(model), do: model
+  defp format_llm_spec({model, _opts}) when is_atom(model), do: Atom.to_string(model)
+  defp format_llm_spec(model) when is_binary(model), do: model
+  defp format_llm_spec(model) when is_atom(model), do: Atom.to_string(model)
+  defp format_llm_spec(other), do: inspect(other, limit: 1)
+
   defp start_ask_task(socket, params, llm, question) do
     repo = socket.assigns.repo
     sub_tab = params["sub_tab"] || "advanced"
@@ -175,10 +236,12 @@ defmodule ArcanaWeb.AskLive do
 
     Arcana.TaskSupervisor.start_child(fn ->
       handler_id = "pipeline-progress-#{inspect(parent)}"
+      trace_handler_id = "trace-progress-#{inspect(parent)}"
+      loop_handler_id = "loop-progress-#{inspect(parent)}"
 
       graph_enabled = params["graph_search"] == "true"
 
-      steps = [
+      pipeline_steps = [
         :gate,
         :rewrite,
         :expand,
@@ -192,13 +255,15 @@ defmodule ArcanaWeb.AskLive do
         :ground
       ]
 
-      events =
-        Enum.map(steps, &[:arcana, :pipeline, &1, :start]) ++
+      # Pipeline progress label events (the old "Running X..." text that
+      # updates the spinner label).
+      label_events =
+        Enum.map(pipeline_steps, &[:arcana, :pipeline, &1, :start]) ++
           [[:arcana, :graph, :search, :start]]
 
       :telemetry.attach_many(
         handler_id,
-        events,
+        label_events,
         fn
           [:arcana, :graph, :search, :start], _measurements, _metadata, _config ->
             send(parent, {:pipeline_progress, "Searching with graph connections..."})
@@ -210,6 +275,74 @@ defmodule ArcanaWeb.AskLive do
                 else: pipeline_step_label(step)
 
             if label, do: send(parent, {:pipeline_progress, label})
+        end,
+        nil
+      )
+
+      # Trace events for the live step-by-step panel. Every sub-tab
+      # subscribes, the handler normalizes the event path to a
+      # `{:trace_step_start, atom}` / `{:trace_step_stop, atom, ms, meta}`
+      # tuple. Pipeline and Advanced both flow through this pathway.
+      trace_events =
+        Enum.flat_map(pipeline_steps, fn step ->
+          [
+            [:arcana, :pipeline, step, :start],
+            [:arcana, :pipeline, step, :stop]
+          ]
+        end) ++
+          [
+            [:arcana, :search, :start],
+            [:arcana, :search, :stop],
+            [:arcana, :graph, :search, :start],
+            [:arcana, :graph, :search, :stop],
+            [:arcana, :llm, :complete, :start],
+            [:arcana, :llm, :complete, :stop]
+          ]
+
+      :telemetry.attach_many(
+        trace_handler_id,
+        trace_events,
+        fn event, measurements, metadata, _config ->
+          case {event, measurements} do
+            {[:arcana, :pipeline, step, :start], _} ->
+              send(parent, {:trace_step_start, step})
+
+            {[:arcana, :pipeline, step, :stop], %{duration: d}} ->
+              send(parent, {:trace_step_stop, step, native_to_ms(d), metadata})
+
+            {[:arcana, :search, :start], _} ->
+              send(parent, {:trace_step_start, :search})
+
+            {[:arcana, :search, :stop], %{duration: d}} ->
+              send(parent, {:trace_step_stop, :search, native_to_ms(d), metadata})
+
+            {[:arcana, :graph, :search, :start], _} ->
+              send(parent, {:trace_step_start, :graph_search})
+
+            {[:arcana, :graph, :search, :stop], %{duration: d}} ->
+              send(parent, {:trace_step_stop, :graph_search, native_to_ms(d), metadata})
+
+            {[:arcana, :llm, :complete, :start], _} ->
+              send(parent, {:trace_step_start, :llm_complete})
+
+            {[:arcana, :llm, :complete, :stop], %{duration: d}} ->
+              send(parent, {:trace_step_stop, :llm_complete, native_to_ms(d), metadata})
+
+            _ ->
+              :ok
+          end
+        end,
+        nil
+      )
+
+      # Per-tool-call telemetry for the Loop sub-tab. Each event carries
+      # the same shape as a tool_history entry, so the LV can render
+      # the live trace incrementally as the loop unfolds.
+      :telemetry.attach(
+        loop_handler_id,
+        [:arcana, :loop, :tool_call],
+        fn _event, _measurements, metadata, _config ->
+          send(parent, {:loop_progress, metadata})
         end,
         nil
       )
@@ -226,8 +359,14 @@ defmodule ArcanaWeb.AskLive do
         )
 
       :telemetry.detach(handler_id)
+      :telemetry.detach(trace_handler_id)
+      :telemetry.detach(loop_handler_id)
       send(parent, {:ask_complete, result})
     end)
+  end
+
+  defp native_to_ms(duration) do
+    System.convert_time_unit(duration, :native, :millisecond)
   end
 
   defp run_ask("advanced", question, repo, llm, _all_collections, params, selected_collections) do
@@ -264,6 +403,28 @@ defmodule ArcanaWeb.AskLive do
     {:noreply, assign(socket, pipeline_step: step)}
   end
 
+  def handle_info({:loop_progress, entry}, socket) do
+    # Append, not prepend: render order matches iteration order so the
+    # newest entry visually lands at the bottom of the trace.
+    {:noreply, assign(socket, loop_live_history: socket.assigns.loop_live_history ++ [entry])}
+  end
+
+  def handle_info({:trace_step_start, step}, socket) do
+    entry = %{step: step, status: :running, duration_ms: nil, meta: nil}
+
+    {:noreply, assign(socket, trace_history: socket.assigns.trace_history ++ [entry])}
+  end
+
+  def handle_info({:trace_step_stop, step, duration_ms, metadata}, socket) do
+    history =
+      socket.assigns.trace_history
+      |> Enum.reverse()
+      |> mark_step_done(step, duration_ms, metadata)
+      |> Enum.reverse()
+
+    {:noreply, assign(socket, trace_history: history)}
+  end
+
   def handle_info({:ask_complete, result}, socket) do
     socket =
       case result do
@@ -276,6 +437,25 @@ defmodule ArcanaWeb.AskLive do
 
     {:noreply, socket}
   end
+
+  # Update the most recent :running entry that matches `step`. Walking
+  # the reversed list and replacing the first match is correct because
+  # pipeline steps are sequential — the latest :running entry for a
+  # given step name is always the one that just stopped.
+  defp mark_step_done(
+         [%{step: step, status: :running} = entry | rest],
+         step,
+         duration_ms,
+         metadata
+       ) do
+    [%{entry | status: :done, duration_ms: duration_ms, meta: metadata} | rest]
+  end
+
+  defp mark_step_done([head | rest], step, duration_ms, metadata) do
+    [head | mark_step_done(rest, step, duration_ms, metadata)]
+  end
+
+  defp mark_step_done([], _step, _duration_ms, _metadata), do: []
 
   defp run_loop_ask(question, repo, llm, selected_collections, params) do
     max_iterations =
@@ -740,20 +920,35 @@ defmodule ArcanaWeb.AskLive do
           <% end %>
 
           <%= if @ask_sub_tab == :loop do %>
+            <% llms = loop_llm_roles() %>
             <div class="arcana-loop-settings">
               <h4>Loop settings</h4>
               <div class="arcana-loop-settings-grid">
-                <div class="arcana-loop-setting">
-                  <label>Controller</label>
-                  <small>Picks tools each turn. Uses the app-level LLM config.</small>
+                <div class="arcana-loop-setting arcana-loop-setting--info">
+                  <label>Controller LLM</label>
+                  <small>Picks tools each turn.</small>
+                  <div class="arcana-loop-setting-value"><%= llms.controller || "—" %></div>
+                </div>
+                <div class="arcana-loop-setting arcana-loop-setting--info">
+                  <label>Answer LLM</label>
+                  <small>
+                    <%= if llms.answer,
+                      do: "Rewrites the final user-facing answer.",
+                      else: "Not set. Uses the controller's tool text directly." %>
+                  </small>
                   <div class="arcana-loop-setting-value">
-                    <code>config :arcana, :llm</code> (inherited)
+                    <%= llms.answer || "(uses controller)" %>
                   </div>
                 </div>
-                <div class="arcana-loop-setting">
+                <div class="arcana-loop-setting arcana-loop-setting--info">
+                  <label>Fallback synthesizer</label>
+                  <small>Used when max_iterations hits with chunks but no answer call.</small>
+                  <div class="arcana-loop-setting-value"><%= llms.fallback || "—" %></div>
+                </div>
+                <div class="arcana-loop-setting arcana-loop-setting--info">
                   <label>Tools (default set)</label>
                   <small>
-                    <code>search</code>, <code>answer</code>, <code>give_up</code>
+                    <code>search</code> · <code>answer</code> · <code>give_up</code>
                   </small>
                 </div>
                 <div class="arcana-loop-setting">
@@ -782,18 +977,18 @@ defmodule ArcanaWeb.AskLive do
                     disabled={@ask_running}
                   />
                 </div>
-                <div class="arcana-loop-setting">
-                  <label class="arcana-checkbox-label">
-                    <input
-                      type="checkbox"
-                      name="use_ground_loop"
-                      value="true"
-                      disabled={@ask_running}
-                    />
-                    <span>Run grounding after loop</span>
-                  </label>
-                  <small>Score sentences against accumulated chunks. Slower.</small>
-                </div>
+                <label class="arcana-loop-setting arcana-loop-setting--toggle">
+                  <input
+                    type="checkbox"
+                    name="use_ground_loop"
+                    value="true"
+                    disabled={@ask_running}
+                  />
+                  <span class="arcana-loop-toggle-content">
+                    <span class="arcana-loop-toggle-label">Run grounding after loop</span>
+                    <small>Score sentences against accumulated chunks. Slower.</small>
+                  </span>
+                </label>
               </div>
             </div>
           <% end %>
@@ -815,6 +1010,90 @@ defmodule ArcanaWeb.AskLive do
             <div class="arcana-spinner"></div>
             <span><%= ask_loading_label(@ask_sub_tab, @pipeline_step) %></span>
           </div>
+
+          <%= if @ask_sub_tab == :loop do %>
+            <div class="arcana-loop-live-trace" id="loop-live-trace">
+              <div class="arcana-loop-live-header">
+                <span class="arcana-loop-live-pulse"></span>
+                <span class="arcana-loop-live-title">Agent thinking</span>
+                <span class="arcana-loop-live-count">
+                  <%= length(@loop_live_history) %> <%= if length(@loop_live_history) == 1, do: "iteration", else: "iterations" %>
+                </span>
+              </div>
+
+              <%= if @loop_live_history == [] do %>
+                <div class="arcana-loop-live-empty">
+                  Waiting for the controller's first move…
+                </div>
+              <% else %>
+                <ol class="arcana-loop-iterations arcana-loop-iterations--live">
+                  <%= for entry <- @loop_live_history do %>
+                    <li class={"arcana-loop-iteration arcana-tool-#{entry.tool}"}>
+                      <div class="arcana-loop-iter-header">
+                        <span class="arcana-loop-iter-num">[<%= entry.iteration %>]</span>
+                        <span class="arcana-loop-tool"><%= to_string(entry.tool) %></span>
+                        <span class="arcana-loop-args">
+                          <%= loop_arg_summary(entry.tool, entry.args) %>
+                        </span>
+                        <%= if length(entry.returned_chunk_ids) > 0 do %>
+                          <span class="arcana-loop-chunk-count">
+                            → <%= length(entry.returned_chunk_ids) %> chunks
+                          </span>
+                        <% end %>
+                      </div>
+                    </li>
+                  <% end %>
+                </ol>
+              <% end %>
+            </div>
+          <% end %>
+
+          <%= if @ask_sub_tab in [:pipeline, :advanced] do %>
+            <div class="arcana-loop-live-trace" id="trace-live-trace">
+              <div class="arcana-loop-live-header">
+                <span class="arcana-loop-live-pulse"></span>
+                <span class="arcana-loop-live-title">
+                  <%= if @ask_sub_tab == :pipeline, do: "Pipeline", else: "Retrieval" %>
+                </span>
+                <span class="arcana-loop-live-count">
+                  <%= length(@trace_history) %> <%= if length(@trace_history) == 1, do: "step", else: "steps" %>
+                </span>
+              </div>
+
+              <%= if @trace_history == [] do %>
+                <div class="arcana-loop-live-empty">
+                  Waiting for the first step…
+                </div>
+              <% else %>
+                <ol class="arcana-loop-iterations arcana-loop-iterations--live arcana-pipeline-iterations">
+                  <%= for {entry, index} <- Enum.with_index(@trace_history, 1) do %>
+                    <li class={"arcana-loop-iteration arcana-pipeline-step-trace arcana-pipeline-step-trace--#{entry.status}"}>
+                      <div class="arcana-loop-iter-header">
+                        <span class="arcana-loop-iter-num">
+                          <%= if entry.status == :running do %>
+                            <span class="arcana-pipeline-step-spinner"></span>
+                          <% else %>
+                            <%= index %>
+                          <% end %>
+                        </span>
+                        <span class="arcana-loop-tool">
+                          <%= pipeline_step_short(entry.step) %>
+                        </span>
+                        <span class="arcana-loop-args">
+                          <%= pipeline_step_meta_summary(entry.step, entry.meta) %>
+                        </span>
+                        <%= if entry.status == :done and entry.duration_ms do %>
+                          <span class="arcana-loop-chunk-count">
+                            <%= format_duration(entry.duration_ms) %>
+                          </span>
+                        <% end %>
+                      </div>
+                    </li>
+                  <% end %>
+                </ol>
+              <% end %>
+            </div>
+          <% end %>
         <% end %>
 
         <%= if @ask_context do %>
@@ -1152,4 +1431,63 @@ defmodule ArcanaWeb.AskLive do
   defp pipeline_step_label(:answer), do: "Generating answer..."
   defp pipeline_step_label(:ground), do: "Checking for hallucinations..."
   defp pipeline_step_label(_), do: nil
+
+  # Short labels for the trace tool badge. Covers both Pipeline step
+  # names and the top-level events that fire during an Advanced run
+  # (Arcana.search/2 → graph search → LLM answer generation).
+  defp pipeline_step_short(:gate), do: "gate"
+  defp pipeline_step_short(:rewrite), do: "rewrite"
+  defp pipeline_step_short(:expand), do: "expand"
+  defp pipeline_step_short(:decompose), do: "decompose"
+  defp pipeline_step_short(:select), do: "select"
+  defp pipeline_step_short(:search), do: "search"
+  defp pipeline_step_short(:reason), do: "reason"
+  defp pipeline_step_short(:self_correct), do: "self_correct"
+  defp pipeline_step_short(:rerank), do: "rerank"
+  defp pipeline_step_short(:answer), do: "answer"
+  defp pipeline_step_short(:ground), do: "ground"
+  defp pipeline_step_short(:graph_search), do: "graph_search"
+  defp pipeline_step_short(:llm_complete), do: "llm"
+  defp pipeline_step_short(other), do: to_string(other)
+
+  # Picks the most useful one-liner from a pipeline step's :stop
+  # telemetry metadata. Each step emits different keys, so we look
+  # for the ones the pipeline actually populates and fall back to "".
+  defp pipeline_step_meta_summary(_step, nil), do: ""
+
+  defp pipeline_step_meta_summary(:rewrite, %{rewritten_query: q}) when is_binary(q),
+    do: ~s("#{q}")
+
+  defp pipeline_step_meta_summary(:expand, %{expanded_query: q}) when is_binary(q),
+    do: ~s("#{q}")
+
+  defp pipeline_step_meta_summary(:decompose, %{sub_questions: subs}) when is_list(subs),
+    do: "#{length(subs)} sub-questions"
+
+  defp pipeline_step_meta_summary(:select, %{collections: colls}) when is_list(colls),
+    do: Enum.join(colls, ", ")
+
+  defp pipeline_step_meta_summary(:search, %{result_count: n}), do: "#{n} chunks"
+
+  defp pipeline_step_meta_summary(:search, %{results: r}) when is_list(r),
+    do: "#{length(r)} chunks"
+
+  defp pipeline_step_meta_summary(:rerank, %{result_count: n}), do: "#{n} kept"
+  defp pipeline_step_meta_summary(:gate, %{skip_retrieval: true}), do: "skip retrieval"
+  defp pipeline_step_meta_summary(:gate, %{skip_retrieval: false}), do: "retrieve"
+
+  defp pipeline_step_meta_summary(:graph_search, %{entity_count: n, result_count: r}),
+    do: "#{n} entities → #{r} chunks"
+
+  defp pipeline_step_meta_summary(:graph_search, %{entity_count: n}),
+    do: "#{n} entities"
+
+  defp pipeline_step_meta_summary(:llm_complete, %{model: model}) when is_binary(model),
+    do: model
+
+  defp pipeline_step_meta_summary(:llm_complete, _), do: ""
+  defp pipeline_step_meta_summary(_step, _meta), do: ""
+
+  defp format_duration(ms) when ms < 1000, do: "#{ms}ms"
+  defp format_duration(ms), do: "#{Float.round(ms / 1000, 1)}s"
 end
