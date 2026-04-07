@@ -9,6 +9,11 @@ defmodule ArcanaWeb.AskLive do
 
   alias Arcana.Graph.Entity
 
+  # Form param names for the Pipeline tab's optional steps. Tracked in
+  # socket assigns so the all/none toggle can update them server-side
+  # rather than reaching into the DOM with inline JS.
+  @pipeline_step_keys ~w(use_gate use_rewrite use_expand use_decompose use_reason self_correct use_rerank use_ground)
+
   @impl true
   def mount(_params, session, socket) do
     repo = get_repo_from_session(session)
@@ -17,7 +22,7 @@ defmodule ArcanaWeb.AskLive do
      socket
      |> assign(repo: repo)
      |> assign(
-       ask_mode: :agentic,
+       ask_sub_tab: :advanced,
        ask_question: "",
        ask_running: false,
        ask_context: nil,
@@ -28,14 +33,48 @@ defmodule ArcanaWeb.AskLive do
        selected_collections: [],
        graph_context_expanded: true,
        llm_select: false,
-       pipeline_step: nil
+       pipeline_step: nil,
+       pipeline_steps: Map.new(@pipeline_step_keys, &{&1, false})
      )}
   end
 
   @impl true
-  def handle_params(_params, _uri, socket) do
-    {:noreply, load_data(socket)}
+  def handle_params(params, _uri, socket) do
+    sub_tab = parse_sub_tab(params["sub_tab"])
+    sub_tab_changed? = sub_tab != socket.assigns.ask_sub_tab
+    # LLM collection select only makes sense on the Pipeline sub-tab
+    llm_select = if sub_tab == :pipeline, do: socket.assigns.llm_select, else: false
+
+    socket =
+      socket
+      |> assign(ask_sub_tab: sub_tab, llm_select: llm_select)
+      |> maybe_reset_ask_state(sub_tab_changed?)
+      |> maybe_load_data()
+
+    {:noreply, socket}
   end
+
+  # Stats and collections only need to load once per LiveView session.
+  # Sub-tab switches re-enter handle_params/3 via push_patch but don't
+  # need to re-query the DB.
+  defp maybe_load_data(%{assigns: %{stats: nil}} = socket), do: load_data(socket)
+  defp maybe_load_data(socket), do: socket
+
+  # Switching sub-tabs swaps in a different retrieval strategy, so any
+  # previously rendered context, error, or pipeline progress label belongs
+  # to the old strategy and would be confusing to leave visible.
+  defp maybe_reset_ask_state(socket, false), do: socket
+
+  defp maybe_reset_ask_state(socket, true) do
+    assign(socket, ask_context: nil, ask_error: nil, pipeline_step: nil)
+  end
+
+  defp parse_sub_tab("advanced"), do: :advanced
+  defp parse_sub_tab("pipeline"), do: :pipeline
+  defp parse_sub_tab("loop"), do: :loop
+  # Any other value (including nil for /arcana/ask with no segment, or an
+  # unknown sub-tab name) falls back to the default landing.
+  defp parse_sub_tab(_), do: :advanced
 
   defp load_data(socket) do
     repo = socket.assigns.repo
@@ -97,16 +136,17 @@ defmodule ArcanaWeb.AskLive do
     {:noreply, assign(socket, ask_context: nil, ask_error: nil, ask_question: "")}
   end
 
-  def handle_event("ask_switch_mode", %{"mode" => mode}, socket) do
-    mode = String.to_existing_atom(mode)
-    # Reset llm_select when switching to simple mode
-    llm_select = if mode == :simple, do: false, else: socket.assigns.llm_select
-    {:noreply, assign(socket, ask_mode: mode, llm_select: llm_select)}
+  def handle_event("ask_switch_sub_tab", %{"sub_tab" => sub_tab}, socket) do
+    # push_patch to the corresponding URL so the sub-tab selection is
+    # shareable and survives page reloads. handle_params/3 will pick
+    # up the new :sub_tab param and update the assigns.
+    {:noreply, push_patch(socket, to: "/arcana/ask/#{sub_tab}")}
   end
 
   def handle_event("form_changed", params, socket) do
     selected = params["collections"] || []
-    {:noreply, assign(socket, selected_collections: selected)}
+    pipeline_steps = Map.new(@pipeline_step_keys, &{&1, params[&1] == "true"})
+    {:noreply, assign(socket, selected_collections: selected, pipeline_steps: pipeline_steps)}
   end
 
   def handle_event("toggle_graph_context", _params, socket) do
@@ -117,9 +157,19 @@ defmodule ArcanaWeb.AskLive do
     {:noreply, assign(socket, llm_select: !socket.assigns.llm_select)}
   end
 
+  def handle_event("set_pipeline_steps", %{"value" => value}, socket) do
+    enabled? = value == "all"
+    steps = Map.new(@pipeline_step_keys, &{&1, enabled?})
+    {:noreply, assign(socket, pipeline_steps: steps)}
+  end
+
+  defp ask_loading_label(:advanced, _step), do: "Generating answer..."
+  defp ask_loading_label(:loop, _step), do: "Running agent loop..."
+  defp ask_loading_label(:pipeline, step), do: step || "Running pipeline..."
+
   defp start_ask_task(socket, params, llm, question) do
     repo = socket.assigns.repo
-    mode = params["mode"] || "simple"
+    sub_tab = params["sub_tab"] || "advanced"
     selected_collections = params["collections"] || []
     parent = self()
 
@@ -128,7 +178,19 @@ defmodule ArcanaWeb.AskLive do
 
       graph_enabled = params["graph_search"] == "true"
 
-      steps = [:expand, :decompose, :select, :search, :self_correct, :rerank, :answer, :ground]
+      steps = [
+        :gate,
+        :rewrite,
+        :expand,
+        :decompose,
+        :select,
+        :search,
+        :reason,
+        :self_correct,
+        :rerank,
+        :answer,
+        :ground
+      ]
 
       events =
         Enum.map(steps, &[:arcana, :pipeline, &1, :start]) ++
@@ -154,7 +216,7 @@ defmodule ArcanaWeb.AskLive do
 
       result =
         run_ask(
-          mode,
+          sub_tab,
           question,
           repo,
           llm,
@@ -168,20 +230,27 @@ defmodule ArcanaWeb.AskLive do
     end)
   end
 
-  defp run_ask("simple", question, repo, llm, _all_collections, params, selected_collections) do
-    run_simple_ask(question, repo, llm, selected_collections, params)
+  defp run_ask("advanced", question, repo, llm, _all_collections, params, selected_collections) do
+    run_advanced_ask(question, repo, llm, selected_collections, params)
   end
 
-  defp run_ask(_mode, question, repo, llm, all_collections, params, selected_collections) do
-    run_agentic_ask(
+  defp run_ask("loop", question, repo, llm, _all_collections, params, selected_collections) do
+    run_loop_ask(question, repo, llm, selected_collections, params)
+  end
+
+  defp run_ask("pipeline", question, repo, llm, all_collections, params, selected_collections) do
+    run_pipeline_ask(
       question,
       repo,
       llm,
       all_collections,
       collections: selected_collections,
       use_llm_select: params["llm_select"] == "true",
+      use_gate: params["use_gate"] == "true",
+      use_rewrite: params["use_rewrite"] == "true",
       use_expand: params["use_expand"] == "true",
       use_decompose: params["use_decompose"] == "true",
+      use_reason: params["use_reason"] == "true",
       use_rerank: params["use_rerank"] == "true",
       use_ground: params["use_ground"] == "true",
       self_correct: params["self_correct"] == "true",
@@ -208,7 +277,72 @@ defmodule ArcanaWeb.AskLive do
     {:noreply, socket}
   end
 
-  defp run_simple_ask(question, repo, llm, selected_collections, params) do
+  defp run_loop_ask(question, repo, llm, selected_collections, params) do
+    max_iterations =
+      case Integer.parse(params["max_iterations"] || "10") do
+        {n, _} when n > 0 -> n
+        _ -> 10
+      end
+
+    chunk_cap =
+      case Integer.parse(params["chunk_cap"] || "30") do
+        {n, _} when n > 0 -> n
+        _ -> 30
+      end
+
+    run_ground? = params["use_ground_loop"] == "true"
+
+    new_opts =
+      [repo: repo]
+      |> maybe_put_collection_opt(selected_collections)
+
+    run_opts = [
+      controller_llm: llm,
+      max_iterations: max_iterations,
+      chunk_cap: chunk_cap
+    ]
+
+    ctx = Arcana.Loop.new(question, new_opts)
+    runner = loop_runner()
+
+    with {:ok, ctx} <- runner.(ctx, run_opts) do
+      ctx = if run_ground?, do: Arcana.Loop.ground(ctx), else: ctx
+      {:ok, format_loop_result(ctx, question)}
+    end
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
+  # Hook for tests to stub out Loop execution. Defaults to the real Loop.run/2.
+  defp loop_runner do
+    Application.get_env(:arcana, :loop_runner) || (&Arcana.Loop.run/2)
+  end
+
+  defp maybe_put_collection_opt(opts, []), do: opts
+  defp maybe_put_collection_opt(opts, [single]), do: Keyword.put(opts, :collection, single)
+  defp maybe_put_collection_opt(opts, multiple), do: Keyword.put(opts, :collections, multiple)
+
+  defp format_loop_result(%Arcana.Loop.Context{} = ctx, question) do
+    %{
+      result_type: :loop,
+      question: question,
+      answer: ctx.answer,
+      tool_history: ctx.tool_history,
+      terminated_by: ctx.terminated_by,
+      iterations: ctx.iterations,
+      chunks: ctx.chunks,
+      grounding: ctx.grounding,
+      # Mirror the Pipeline result shape so existing result sections
+      # (grounding, chunks) can reuse the same rendering. The extras are
+      # what drives the agent trace view.
+      results: ctx.chunks,
+      expanded_query: nil,
+      sub_questions: nil,
+      selected_collections: nil
+    }
+  end
+
+  defp run_advanced_ask(question, repo, llm, selected_collections, params) do
     graph = params["graph_search"] == "true"
     opts = [repo: repo, llm: llm, graph: graph]
 
@@ -240,23 +374,34 @@ defmodule ArcanaWeb.AskLive do
     e -> {:error, Exception.message(e)}
   end
 
-  defp run_agentic_ask(question, repo, llm, all_collections, opts) do
+  defp run_pipeline_ask(question, repo, llm, all_collections, opts) do
     alias Arcana.Pipeline
 
     all_collection_names = Enum.map(all_collections, & &1.name)
     search_opts = build_search_opts(opts, all_collection_names)
 
     Pipeline.new(question, repo: repo, llm: llm)
+    |> maybe_gate(opts)
+    |> maybe_rewrite(opts)
     |> maybe_select(opts, all_collection_names)
     |> maybe_expand(opts)
     |> maybe_decompose(opts)
     |> Pipeline.search(search_opts)
+    |> maybe_reason(opts)
     |> maybe_rerank(opts)
     |> maybe_answer_with_hallucinations(opts)
     |> maybe_ground(opts)
-    |> format_agentic_result(question)
+    |> format_pipeline_result(question)
   rescue
     e -> {:error, Exception.message(e)}
+  end
+
+  defp maybe_gate(ctx, opts) do
+    if Keyword.get(opts, :use_gate, false), do: Arcana.Pipeline.gate(ctx), else: ctx
+  end
+
+  defp maybe_rewrite(ctx, opts) do
+    if Keyword.get(opts, :use_rewrite, false), do: Arcana.Pipeline.rewrite(ctx), else: ctx
   end
 
   defp maybe_select(ctx, opts, all_collection_names) do
@@ -273,6 +418,10 @@ defmodule ArcanaWeb.AskLive do
 
   defp maybe_decompose(ctx, opts) do
     if Keyword.get(opts, :use_decompose, false), do: Arcana.Pipeline.decompose(ctx), else: ctx
+  end
+
+  defp maybe_reason(ctx, opts) do
+    if Keyword.get(opts, :use_reason, false), do: Arcana.Pipeline.reason(ctx), else: ctx
   end
 
   defp maybe_rerank(ctx, opts) do
@@ -326,11 +475,11 @@ defmodule ArcanaWeb.AskLive do
   defp add_collection_opts(opts, [single]), do: Keyword.put(opts, :collection, single)
   defp add_collection_opts(opts, multiple), do: Keyword.put(opts, :collections, multiple)
 
-  defp format_agentic_result(%{error: error}, _question) when not is_nil(error) do
+  defp format_pipeline_result(%{error: error}, _question) when not is_nil(error) do
     {:error, error}
   end
 
-  defp format_agentic_result(ctx, question) do
+  defp format_pipeline_result(ctx, question) do
     # Flatten chunks from nested results to match simple mode format
     all_chunks =
       (ctx.results || [])
@@ -359,31 +508,47 @@ defmodule ArcanaWeb.AskLive do
       <div class="arcana-ask">
         <h2>Ask</h2>
         <p class="arcana-tab-description">
-          Ask questions about your documents. Choose Simple for basic RAG or Agentic for advanced pipeline features.
+          Send a question through one of three retrieval strategies.
         </p>
 
-        <div class="arcana-ask-mode-nav">
+        <div class="arcana-ask-sub-tab-nav">
           <button
-            class={"arcana-mode-btn #{if @ask_mode == :agentic, do: "active", else: ""}"}
-            phx-click="ask_switch_mode"
-            phx-value-mode="agentic"
+            type="button"
+            class={"arcana-ask-sub-tab #{if @ask_sub_tab == :advanced, do: "active", else: ""}"}
+            phx-click="ask_switch_sub_tab"
+            phx-value-sub_tab="advanced"
           >
-            Agentic
+            Advanced
           </button>
           <button
-            class={"arcana-mode-btn #{if @ask_mode == :simple, do: "active", else: ""}"}
-            phx-click="ask_switch_mode"
-            phx-value-mode="simple"
+            type="button"
+            class={"arcana-ask-sub-tab #{if @ask_sub_tab == :pipeline, do: "active", else: ""}"}
+            phx-click="ask_switch_sub_tab"
+            phx-value-sub_tab="pipeline"
           >
-            Simple
+            Pipeline
+          </button>
+          <button
+            type="button"
+            class={"arcana-ask-sub-tab #{if @ask_sub_tab == :loop, do: "active", else: ""}"}
+            phx-click="ask_switch_sub_tab"
+            phx-value-sub_tab="loop"
+          >
+            Loop
           </button>
         </div>
 
-        <p class="arcana-mode-description">
-          <%= if @ask_mode == :simple do %>
-            Basic RAG: search for relevant chunks and generate an answer.
-          <% else %>
-            Advanced RAG: query expansion, decomposition, self-correction, and reranking.
+        <p class="arcana-sub-tab-description">
+          <%= case @ask_sub_tab do %>
+            <% :advanced -> %>
+              <code>Arcana.ask/2</code> — one call with sensible defaults. Query rewriting,
+              hybrid search, reranking, optional graph fusion.
+            <% :pipeline -> %>
+              <code>Arcana.Pipeline</code> — Modular RAG. Compose the steps yourself,
+              toggle each one on or off below.
+            <% :loop -> %>
+              <code>Arcana.Loop</code> — Agentic RAG. The LLM picks tools each turn
+              until it can answer or hits the iteration cap.
           <% end %>
         </p>
 
@@ -394,7 +559,7 @@ defmodule ArcanaWeb.AskLive do
         <% end %>
 
         <form id="ask-form" phx-submit="ask_submit" phx-change="form_changed" class="arcana-ask-form">
-          <input type="hidden" name="mode" value={@ask_mode} />
+          <input type="hidden" name="sub_tab" value={@ask_sub_tab} />
 
           <div class="arcana-ask-input">
             <textarea
@@ -404,7 +569,7 @@ defmodule ArcanaWeb.AskLive do
               disabled={@ask_running}
             ><%= @ask_question %></textarea>
 
-            <%= if @ask_mode == :simple and selected_graph_enabled?(@collections, @selected_collections) do %>
+            <%= if @ask_sub_tab == :advanced and selected_graph_enabled?(@collections, @selected_collections) do %>
               <label class="arcana-deep-search-toggle">
                 <input
                   type="checkbox"
@@ -421,7 +586,7 @@ defmodule ArcanaWeb.AskLive do
 
           <div class="arcana-ask-collections">
             <label>Collections</label>
-            <%= if @ask_mode == :agentic and length(@collections) > 1 do %>
+            <%= if @ask_sub_tab == :pipeline and length(@collections) > 1 do %>
               <div class="arcana-llm-select-toggle">
                 <label class="arcana-checkbox-label">
                   <input
@@ -456,27 +621,51 @@ defmodule ArcanaWeb.AskLive do
             <% end %>
           </div>
 
-          <%= if @ask_mode == :agentic do %>
+          <%= if @ask_sub_tab == :pipeline do %>
             <div class="arcana-ask-options">
               <h4>
                 Pipeline
                 <span style="font-size: 0.75em; font-weight: normal; opacity: 0.6;">
-                  <a href="#" onclick="this.closest('.arcana-ask-options').querySelectorAll('input[type=checkbox]').forEach(c => c.checked = true); return false">all</a>
+                  <button
+                    type="button"
+                    class="arcana-pipeline-toggle-link"
+                    phx-click="set_pipeline_steps"
+                    phx-value-value="all"
+                  >all</button>
                   /
-                  <a href="#" onclick="this.closest('.arcana-ask-options').querySelectorAll('input[type=checkbox]').forEach(c => c.checked = false); return false">none</a>
+                  <button
+                    type="button"
+                    class="arcana-pipeline-toggle-link"
+                    phx-click="set_pipeline_steps"
+                    phx-value-value="none"
+                  >none</button>
                 </span>
               </h4>
               <ol class="arcana-pipeline">
                 <li>
                   <label class="arcana-pipeline-step">
-                    <input type="checkbox" name="use_expand" value="true" disabled={@ask_running} />
+                    <input type="checkbox" name="use_gate" value="true" checked={@pipeline_steps["use_gate"]} disabled={@ask_running} />
+                    <span class="arcana-step-label">Gate</span>
+                    <small>Skip retrieval if the LLM can answer from general knowledge</small>
+                  </label>
+                </li>
+                <li>
+                  <label class="arcana-pipeline-step">
+                    <input type="checkbox" name="use_rewrite" value="true" checked={@pipeline_steps["use_rewrite"]} disabled={@ask_running} />
+                    <span class="arcana-step-label">Query Rewriting</span>
+                    <small>Clean up conversational input before search</small>
+                  </label>
+                </li>
+                <li>
+                  <label class="arcana-pipeline-step">
+                    <input type="checkbox" name="use_expand" value="true" checked={@pipeline_steps["use_expand"]} disabled={@ask_running} />
                     <span class="arcana-step-label">Query Expansion</span>
                     <small>Generate related queries</small>
                   </label>
                 </li>
                 <li>
                   <label class="arcana-pipeline-step">
-                    <input type="checkbox" name="use_decompose" value="true" disabled={@ask_running} />
+                    <input type="checkbox" name="use_decompose" value="true" checked={@pipeline_steps["use_decompose"]} disabled={@ask_running} />
                     <span class="arcana-step-label">Decomposition</span>
                     <small>Break into sub-questions</small>
                   </label>
@@ -505,16 +694,23 @@ defmodule ArcanaWeb.AskLive do
                 </li>
                 <li>
                   <label class="arcana-pipeline-step">
-                    <input type="checkbox" name="self_correct" value="true" disabled={@ask_running} />
+                    <input type="checkbox" name="use_reason" value="true" checked={@pipeline_steps["use_reason"]} disabled={@ask_running} />
+                    <span class="arcana-step-label">Multi-hop Reasoning</span>
+                    <small>Search again if results are insufficient</small>
+                  </label>
+                </li>
+                <li>
+                  <label class="arcana-pipeline-step">
+                    <input type="checkbox" name="self_correct" value="true" checked={@pipeline_steps["self_correct"]} disabled={@ask_running} />
                     <span class="arcana-step-label">Self-Correction</span>
                     <small>Refine search if results are poor</small>
                   </label>
                 </li>
                 <li>
                   <label class="arcana-pipeline-step">
-                    <input type="checkbox" name="use_rerank" value="true" disabled={@ask_running} />
+                    <input type="checkbox" name="use_rerank" value="true" checked={@pipeline_steps["use_rerank"]} disabled={@ask_running} />
                     <span class="arcana-step-label">Reranking</span>
-                    <small>LLM-based result reranking</small>
+                    <small>Cross-encoder or LLM-based result reranking</small>
                   </label>
                 </li>
                 <li>
@@ -534,12 +730,71 @@ defmodule ArcanaWeb.AskLive do
                 </li>
                 <li>
                   <label class="arcana-pipeline-step">
-                    <input type="checkbox" name="use_ground" value="true" disabled={@ask_running} />
+                    <input type="checkbox" name="use_ground" value="true" checked={@pipeline_steps["use_ground"]} disabled={@ask_running} />
                     <span class="arcana-step-label">Grounding</span>
                     <small>Detect hallucinated vs faithful spans</small>
                   </label>
                 </li>
               </ol>
+            </div>
+          <% end %>
+
+          <%= if @ask_sub_tab == :loop do %>
+            <div class="arcana-loop-settings">
+              <h4>Loop settings</h4>
+              <div class="arcana-loop-settings-grid">
+                <div class="arcana-loop-setting">
+                  <label>Controller</label>
+                  <small>Picks tools each turn. Uses the app-level LLM config.</small>
+                  <div class="arcana-loop-setting-value">
+                    <code>config :arcana, :llm</code> (inherited)
+                  </div>
+                </div>
+                <div class="arcana-loop-setting">
+                  <label>Tools (default set)</label>
+                  <small>
+                    <code>search</code>, <code>answer</code>, <code>give_up</code>
+                  </small>
+                </div>
+                <div class="arcana-loop-setting">
+                  <label for="max_iterations">Max iterations</label>
+                  <small>Hard cap on controller turns.</small>
+                  <input
+                    type="number"
+                    name="max_iterations"
+                    id="max_iterations"
+                    value="10"
+                    min="1"
+                    max="50"
+                    disabled={@ask_running}
+                  />
+                </div>
+                <div class="arcana-loop-setting">
+                  <label for="chunk_cap">Chunk cap</label>
+                  <small>Max chunks accumulated across iterations.</small>
+                  <input
+                    type="number"
+                    name="chunk_cap"
+                    id="chunk_cap"
+                    value="30"
+                    min="1"
+                    max="200"
+                    disabled={@ask_running}
+                  />
+                </div>
+                <div class="arcana-loop-setting">
+                  <label class="arcana-checkbox-label">
+                    <input
+                      type="checkbox"
+                      name="use_ground_loop"
+                      value="true"
+                      disabled={@ask_running}
+                    />
+                    <span>Run grounding after loop</span>
+                  </label>
+                  <small>Score sentences against accumulated chunks. Slower.</small>
+                </div>
+              </div>
             </div>
           <% end %>
 
@@ -558,7 +813,7 @@ defmodule ArcanaWeb.AskLive do
         <%= if @ask_running do %>
           <div class="arcana-ask-loading">
             <div class="arcana-spinner"></div>
-            <span><%= if @ask_mode == :simple, do: "Generating answer...", else: @pipeline_step || "Running pipeline..." %></span>
+            <span><%= ask_loading_label(@ask_sub_tab, @pipeline_step) %></span>
           </div>
         <% end %>
 
@@ -578,6 +833,38 @@ defmodule ArcanaWeb.AskLive do
                 <% end %>
               </div>
             </div>
+
+            <%= if Map.get(@ask_context, :result_type) == :loop do %>
+              <div class="arcana-ask-section arcana-loop-trace">
+                <h4>
+                  Agent trace
+                  <span class="arcana-loop-meta">
+                    <code><%= to_string(@ask_context.terminated_by) %></code>
+                    &middot; <%= @ask_context.iterations %> iterations
+                    &middot; <%= length(@ask_context.chunks) %> chunks accumulated
+                  </span>
+                </h4>
+
+                <ol class="arcana-loop-iterations">
+                  <%= for entry <- @ask_context.tool_history do %>
+                    <li class={"arcana-loop-iteration arcana-tool-#{entry.tool}"}>
+                      <div class="arcana-loop-iter-header">
+                        <span class="arcana-loop-iter-num">[<%= entry.iteration %>]</span>
+                        <span class="arcana-loop-tool"><%= to_string(entry.tool) %></span>
+                        <span class="arcana-loop-args">
+                          <%= loop_arg_summary(entry.tool, entry.args) %>
+                        </span>
+                        <%= if length(entry.returned_chunk_ids) > 0 do %>
+                          <span class="arcana-loop-chunk-count">
+                            → <%= length(entry.returned_chunk_ids) %> chunks
+                          </span>
+                        <% end %>
+                      </div>
+                    </li>
+                  <% end %>
+                </ol>
+              </div>
+            <% end %>
 
             <%= if Map.get(@ask_context, :grounding) do %>
               <div class="arcana-ask-section arcana-grounding-results">
@@ -617,29 +904,31 @@ defmodule ArcanaWeb.AskLive do
               </div>
             <% end %>
 
-            <%= if @ask_context.expanded_query do %>
+            <%= if Map.get(@ask_context, :expanded_query) do %>
               <div class="arcana-ask-section">
                 <h4>Expanded Query</h4>
                 <p class="arcana-expanded-query"><%= @ask_context.expanded_query %></p>
               </div>
             <% end %>
 
-            <%= if @ask_context.sub_questions && length(@ask_context.sub_questions) > 0 do %>
+            <% sub_qs = Map.get(@ask_context, :sub_questions) %>
+            <%= if sub_qs && length(sub_qs) > 0 do %>
               <div class="arcana-ask-section">
                 <h4>Sub-Questions</h4>
                 <ul class="arcana-query-list">
-                  <%= for sq <- @ask_context.sub_questions do %>
+                  <%= for sq <- sub_qs do %>
                     <li><%= sq %></li>
                   <% end %>
                 </ul>
               </div>
             <% end %>
 
-            <%= if @ask_context.selected_collections && length(@ask_context.selected_collections) > 0 do %>
+            <% sel_cols = Map.get(@ask_context, :selected_collections) %>
+            <%= if sel_cols && length(sel_cols) > 0 do %>
               <div class="arcana-ask-section">
                 <h4>Selected Collections</h4>
                 <div class="arcana-collection-badges">
-                  <%= for coll <- @ask_context.selected_collections do %>
+                  <%= for coll <- sel_cols do %>
                     <span class="arcana-collection-badge"><%= coll %></span>
                   <% end %>
                 </div>
@@ -654,8 +943,9 @@ defmodule ArcanaWeb.AskLive do
               />
             <% end %>
 
-            <%= if @ask_context.results && length(@ask_context.results) > 0 do %>
-              <% all_chunks = @ask_context.results %>
+            <% all_results = Map.get(@ask_context, :results) %>
+            <%= if all_results && length(all_results) > 0 do %>
+              <% all_chunks = all_results %>
               <div class="arcana-ask-section">
                 <h4>Retrieved Chunks (<%= length(all_chunks) %>)</h4>
                 <div class="arcana-search-results">
@@ -835,10 +1125,28 @@ defmodule ArcanaWeb.AskLive do
     |> Phoenix.HTML.safe_to_string()
   end
 
+  # tool_history entries go through Loop.atomize_keys/1 before they're
+  # recorded, so args always have atom keys by the time they reach here.
+  # The fallback clause handles custom tools with unknown arg shapes.
+  defp loop_arg_summary(:search, %{query: q}) when is_binary(q), do: ~s("#{q}")
+  defp loop_arg_summary(:answer, %{text: t}) when is_binary(t), do: truncate_arg(t)
+  defp loop_arg_summary(:give_up, %{reason: r}) when is_binary(r), do: truncate_arg(r)
+  defp loop_arg_summary(_, _), do: ""
+
+  defp truncate_arg(s) when byte_size(s) <= 80, do: ~s("#{s}")
+
+  defp truncate_arg(s) do
+    head = binary_part(s, 0, 77)
+    ~s("#{head}...")
+  end
+
+  defp pipeline_step_label(:gate), do: "Deciding if retrieval is needed..."
+  defp pipeline_step_label(:rewrite), do: "Rewriting query..."
   defp pipeline_step_label(:expand), do: "Expanding query..."
   defp pipeline_step_label(:decompose), do: "Decomposing question..."
   defp pipeline_step_label(:select), do: "Selecting collections..."
   defp pipeline_step_label(:search), do: "Searching..."
+  defp pipeline_step_label(:reason), do: "Multi-hop reasoning..."
   defp pipeline_step_label(:self_correct), do: "Refining search..."
   defp pipeline_step_label(:rerank), do: "Reranking results..."
   defp pipeline_step_label(:answer), do: "Generating answer..."

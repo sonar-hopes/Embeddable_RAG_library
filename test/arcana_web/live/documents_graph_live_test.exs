@@ -11,8 +11,7 @@ defmodule ArcanaWeb.DocumentsGraphLiveTest do
 
   describe "graph indexing" do
     setup do
-      # Start TaskSupervisor for async operations
-      start_supervised!({Task.Supervisor, name: Arcana.TaskSupervisor})
+      # Arcana.TaskSupervisor is started globally in test/test_helper.exs.
 
       # Enable graph for these tests
       original = Application.get_env(:arcana, :graph, [])

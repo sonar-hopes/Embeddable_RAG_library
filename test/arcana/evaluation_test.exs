@@ -275,6 +275,42 @@ defmodule Arcana.EvaluationTest do
       assert is_number(result.faithfulness_score)
     end
 
+    test "treats a retriever error as a miss instead of crashing the run", %{
+      test_cases: test_cases
+    } do
+      # Defends the {:error, _reason} clause in evaluate_test_case. Before
+      # the fix, a retriever returning {:error, _} would raise CaseClauseError
+      # inside Enum.map and leave the Run row stuck in :running.
+      retriever = fn _question, _opts -> {:error, :db_unreachable} end
+
+      {:ok, run} = Evaluation.run(repo: Repo, retriever: retriever)
+
+      assert run.status == :completed
+      assert run.test_case_count == length(test_cases)
+      # Every case missed: no chunks → MRR 0, all hit rates 0.
+      assert run.metrics.mrr == 0.0
+      assert run.metrics.hit_rate_at_1 == 0.0
+      assert run.metrics.hit_rate_at_10 == 0.0
+    end
+
+    test "faithfulness aggregate is omitted when every score is nil", %{chunks: chunks} do
+      # Defends maybe_put_faithfulness: if every per-case faithfulness call
+      # errors out, the aggregate must be nil (key absent), not 0.0 — the
+      # latter is indistinguishable from "maximally unfaithful" in dashboards.
+      retriever = fn _q, _opts ->
+        {:ok, [%{id: chunks.elixir.id, text: chunks.elixir.text, score: 0.9}],
+         "some pre-generated answer"}
+      end
+
+      llm = fn _prompt -> {:error, :rate_limited} end
+
+      {:ok, run} =
+        Evaluation.run(repo: Repo, retriever: retriever, evaluate_answers: true, llm: llm)
+
+      assert run.status == :completed
+      refute Map.has_key?(run.metrics, :faithfulness)
+    end
+
     test "runs correctness scoring when test case has a reference_answer", %{chunks: chunks} do
       # Create a test case with a reference answer.
       {:ok, tc} =

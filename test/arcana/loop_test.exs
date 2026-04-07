@@ -318,6 +318,54 @@ defmodule Arcana.LoopTest do
       assert search_entry.summary =~ "error"
       assert ctx.chunks == []
     end
+
+    test "search tool with missing :query argument continues the loop with an error summary" do
+      # Defends Tools.execute's `not is_map_key(args, :query)` clause:
+      # a buggy or hallucinating controller can ship a search call without
+      # a query, and the loop should report an error back to the controller
+      # and keep going rather than crashing.
+      controller =
+        scripted_controller([
+          tool_call_response([tool_call("search", %{"limit" => 5}, "c1")]),
+          tool_call_response([tool_call("give_up", %{"reason" => "no query"}, "c2")])
+        ])
+
+      {:ok, ctx} =
+        Loop.new("question")
+        |> Loop.run(controller_llm: controller)
+
+      assert ctx.terminated_by == :gave_up
+      [search_entry, _give_up] = ctx.tool_history
+      assert search_entry.summary =~ "missing :query"
+      assert ctx.chunks == []
+    end
+  end
+
+  describe "run/2 unknown tool name" do
+    test "unknown tool name is recorded as a string without leaking an atom" do
+      # Defends safe_tool_atom: a hallucinated tool name must not get
+      # interned via String.to_atom (atom table is global and unbounded).
+      # When String.to_existing_atom raises, the rescue keeps the binary.
+      hallucinated_name = "hallucinated_tool_#{System.unique_integer([:positive])}"
+
+      controller =
+        scripted_controller([
+          tool_call_response([tool_call(hallucinated_name, %{}, "c1")]),
+          tool_call_response([tool_call("give_up", %{"reason" => "done"}, "c2")])
+        ])
+
+      {:ok, ctx} =
+        Loop.new("question")
+        |> Loop.run(controller_llm: controller)
+
+      [unknown_entry, _give_up] = ctx.tool_history
+      # Stored as the original binary. If safe_tool_atom had called
+      # String.to_atom instead, this would be an atom and the assertion
+      # would fail (binary != atom).
+      assert unknown_entry.tool == hallucinated_name
+      assert is_binary(unknown_entry.tool)
+      assert unknown_entry.summary =~ "Unknown tool"
+    end
   end
 
   describe "run/2 validation" do

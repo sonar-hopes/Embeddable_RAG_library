@@ -6,6 +6,12 @@ Ecto.Adapters.SQL.query!(Arcana.TestRepo, "VACUUM ANALYZE", [])
 
 Ecto.Adapters.SQL.Sandbox.mode(Arcana.TestRepo, :manual)
 
+# Start the task supervisor used by LiveViews for async operations
+# (evaluation, Ask page submissions, maintenance tasks). Without this,
+# LiveView tests that trigger background tasks fail with "no process"
+# on Arcana.TaskSupervisor.
+{:ok, _} = Task.Supervisor.start_link(name: Arcana.TaskSupervisor)
+
 # Start the endpoint for LiveView tests
 {:ok, _} = ArcanaWeb.Endpoint.start_link()
 

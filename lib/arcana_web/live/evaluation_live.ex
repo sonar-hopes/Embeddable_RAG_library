@@ -59,25 +59,27 @@ defmodule ArcanaWeb.EvaluationLive do
 
   @impl true
   def handle_event("eval_switch_view", %{"view" => view}, socket) do
-    {:noreply, assign(socket, eval_view: String.to_existing_atom(view))}
+    {:noreply, assign(socket, eval_view: parse_eval_view(view))}
   end
 
   def handle_event("eval_run", params, socket) do
     repo = socket.assigns.repo
     mode = parse_mode(params["mode"])
+    retriever_name = params["retriever"] || "pipeline"
     evaluate_answers = params["evaluate_answers"] == "true"
 
-    # Check if LLM is configured when evaluate_answers is requested
+    # Check if LLM is configured when evaluate_answers or Loop is requested
     llm = Application.get_env(:arcana, :llm)
+    needs_llm? = evaluate_answers or retriever_name == "loop"
 
-    if evaluate_answers and is_nil(llm) do
+    if needs_llm? and is_nil(llm) do
       {:noreply,
        assign(socket,
          eval_message: {:error, "No LLM configured. Set :arcana, :llm in your config."}
        )}
     else
       socket = assign(socket, eval_running: true, eval_message: nil)
-      opts = build_run_opts(repo, mode, evaluate_answers, llm)
+      opts = build_run_opts(repo, mode, evaluate_answers, llm, retriever_name)
 
       parent = self()
 
@@ -176,10 +178,51 @@ defmodule ArcanaWeb.EvaluationLive do
     {:noreply, socket}
   end
 
-  defp build_run_opts(repo, mode, false, _llm), do: [repo: repo, mode: mode]
+  defp build_run_opts(repo, mode, evaluate_answers, llm, retriever_name) do
+    base =
+      [repo: repo, mode: mode]
+      |> maybe_put_evaluate_answers(evaluate_answers, llm)
+      |> maybe_put_retriever(retriever_name, repo, llm)
 
-  defp build_run_opts(repo, mode, true, llm) do
-    [repo: repo, mode: mode, evaluate_answers: true, llm: llm]
+    base
+  end
+
+  defp maybe_put_evaluate_answers(opts, false, _llm), do: opts
+
+  defp maybe_put_evaluate_answers(opts, true, llm) do
+    Keyword.merge(opts, evaluate_answers: true, llm: llm)
+  end
+
+  # Pipeline is the default — no :retriever needed, Arcana.Evaluation.run/1
+  # falls back to &Arcana.search/2.
+  defp maybe_put_retriever(opts, "pipeline", _repo, _llm), do: opts
+
+  defp maybe_put_retriever(opts, "loop", repo, llm) do
+    # Loop retriever: run a full Arcana.Loop.run/2 per test case and
+    # return the 3-tuple {:ok, chunks, answer}. The answer is the one
+    # the loop produced, so when evaluate_answers: true is on, the
+    # existing machinery skips regeneration and scores it directly.
+    runner = loop_runner()
+
+    retriever = fn question, _opts ->
+      ctx = Arcana.Loop.new(question, repo: repo)
+
+      case runner.(ctx, controller_llm: llm) do
+        {:ok, %Arcana.Loop.Context{} = result_ctx} ->
+          {:ok, result_ctx.chunks, result_ctx.answer}
+
+        {:error, _} = err ->
+          err
+      end
+    end
+
+    Keyword.put(opts, :retriever, retriever)
+  end
+
+  # Testability seam — same pattern used in ask_live.ex so tests can
+  # stub Loop execution without spinning up a real controller.
+  defp loop_runner do
+    Application.get_env(:arcana, :loop_runner) || (&Arcana.Loop.run/2)
   end
 
   defp build_generate_opts(repo, llm, sample_size, nil) do
@@ -189,6 +232,13 @@ defmodule ArcanaWeb.EvaluationLive do
   defp build_generate_opts(repo, llm, sample_size, collection) do
     [repo: repo, llm: llm, sample_size: sample_size, collection: collection]
   end
+
+  defp parse_eval_view("test_cases"), do: :test_cases
+  defp parse_eval_view("run"), do: :run
+  defp parse_eval_view("history"), do: :history
+  # Any other value (an unknown view name from a stale tab or a malformed
+  # phx-value-view payload) falls back to the default landing.
+  defp parse_eval_view(_), do: :test_cases
 
   @impl true
   def render(assigns) do
@@ -320,6 +370,23 @@ defmodule ArcanaWeb.EvaluationLive do
       </p>
 
       <form phx-submit="eval_run" class="arcana-run-form">
+        <fieldset class="arcana-eval-retriever">
+          <legend>Retriever</legend>
+          <label class="arcana-checkbox-label">
+            <input type="radio" name="retriever" value="pipeline" checked />
+            <span>Pipeline</span>
+            <small>Modular RAG via <code>Arcana.search/2</code>. Fast, deterministic.</small>
+          </label>
+          <label class="arcana-checkbox-label">
+            <input type="radio" name="retriever" value="loop" />
+            <span>Loop</span>
+            <small>
+              Agentic RAG via <code>Arcana.Loop</code>. LLM picks tools each turn.
+              Much slower, needs LLM configured.
+            </small>
+          </label>
+        </fieldset>
+
         <label>
           Search Mode
           <select name="mode">
@@ -327,12 +394,17 @@ defmodule ArcanaWeb.EvaluationLive do
             <option value="fulltext">Full-text</option>
             <option value="hybrid">Hybrid</option>
           </select>
+          <small style="display: block; color: #6b7280;">
+            Only used by the Pipeline retriever. Loop always uses semantic.
+          </small>
         </label>
 
         <label style="display: flex; align-items: center; gap: 0.5rem;">
           <input type="checkbox" name="evaluate_answers" value="true" />
           Evaluate Answers
-          <span style="font-size: 0.75rem; color: #6b7280;">(requires LLM)</span>
+          <span style="font-size: 0.75rem; color: #6b7280;">
+            (requires LLM. Scores faithfulness, plus correctness against reference_answer when present.)
+          </span>
         </label>
 
         <button type="submit" disabled={@running or @test_case_count == 0}>
@@ -401,6 +473,12 @@ defmodule ArcanaWeb.EvaluationLive do
                     <div class="arcana-metric-card">
                       <div class="arcana-metric-value"><%= format_score(run.metrics["faithfulness"] || run.metrics[:faithfulness]) %></div>
                       <div class="arcana-metric-label">Faithfulness</div>
+                    </div>
+                  <% end %>
+                  <%= if run.metrics["correctness"] || run.metrics[:correctness] do %>
+                    <div class="arcana-metric-card">
+                      <div class="arcana-metric-value"><%= format_score(run.metrics["correctness"] || run.metrics[:correctness]) %></div>
+                      <div class="arcana-metric-label">Correctness</div>
                     </div>
                   <% end %>
                 </div>

@@ -36,6 +36,8 @@ defmodule ArcanaWeb.InfoLive do
       embedding: format_embedding_config(Application.get_env(:arcana, :embedder, :local)),
       chunker: format_chunker_config(Application.get_env(:arcana, :chunker, :default)),
       reranker: format_reranker_config(Application.get_env(:arcana, :reranker)),
+      grounder: format_grounder_config(),
+      loop: format_loop_config(Application.get_env(:arcana, :loop, [])),
       vector_store: format_vector_store_config(),
       graph: format_graph_config(),
       raw: %{
@@ -43,9 +45,42 @@ defmodule ArcanaWeb.InfoLive do
         llm: Arcana.Config.redact(Application.get_env(:arcana, :llm)),
         reranker: Arcana.Config.redact(Application.get_env(:arcana, :reranker)),
         chunker: Arcana.Config.redact(Application.get_env(:arcana, :chunker, :default)),
+        loop: Arcana.Config.redact(Application.get_env(:arcana, :loop, [])),
         graph: Arcana.Config.redact(Application.get_env(:arcana, :graph, [])),
         vector_store: Application.get_env(:arcana, :vector_store, :pgvector)
       }
+    }
+  end
+
+  # Loop config lives under `config :arcana, :loop, [...]`. The values are
+  # merged with per-call options inside Arcana.Loop.run/2 via
+  # Arcana.Config.merge_app_opts/2. We surface the effective defaults so
+  # users can see what their app config sets.
+  defp format_loop_config(loop_opts) do
+    %{
+      max_iterations: Keyword.get(loop_opts, :max_iterations, 10),
+      chunk_cap: Keyword.get(loop_opts, :chunk_cap, 30),
+      controller_llm: format_loop_controller_llm(loop_opts),
+      configured: loop_opts != []
+    }
+  end
+
+  defp format_loop_controller_llm(loop_opts) do
+    case Keyword.get(loop_opts, :controller_llm) do
+      nil -> nil
+      llm -> Arcana.Config.redact(llm)
+    end
+  end
+
+  # Grounder doesn't live in app config — it's resolved per-call by
+  # Pipeline.ground/2 and Loop.ground/2 with a default of
+  # Arcana.Grounder.Hallmark. Surface that as the "default" so users
+  # know which grounder ships out of the box.
+  defp format_grounder_config do
+    %{
+      default: Arcana.Grounder.Hallmark,
+      description:
+        "Local Vectara HHEM via Bumblebee. Override per-call with the :grounder option."
     }
   end
 
@@ -244,6 +279,7 @@ defmodule ArcanaWeb.InfoLive do
       llm: #{inspect(assigns.config_info.raw.llm)},
       chunker: #{inspect(assigns.config_info.raw.chunker)},
       reranker: #{if assigns.config_info.raw.reranker, do: inspect(assigns.config_info.raw.reranker), else: "nil # defaults to Arcana.Reranker.LLM"},
+      loop: #{inspect(assigns.config_info.raw.loop)},
       vector_store: #{inspect(assigns.config_info.raw.vector_store)},
       graph: #{inspect(assigns.config_info.raw.graph)}
     """
@@ -358,6 +394,59 @@ defmodule ArcanaWeb.InfoLive do
               <div class="arcana-doc-field">
                 <label>Status</label>
                 <span><%= if @config_info.reranker.configured, do: "Configured", else: "Default" %></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="arcana-info-section">
+            <h3>Grounder</h3>
+            <div class="arcana-doc-info">
+              <div class="arcana-doc-field">
+                <label>Default</label>
+                <code><%= inspect(@config_info.grounder.default) %></code>
+              </div>
+              <div class="arcana-doc-field">
+                <label>Description</label>
+                <span><%= @config_info.grounder.description %></span>
+              </div>
+              <div class="arcana-doc-field">
+                <label>Used by</label>
+                <span><code>Pipeline.ground/2</code> and <code>Loop.ground/2</code></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="arcana-info-section">
+            <h3>Loop</h3>
+            <div class="arcana-doc-info">
+              <div class="arcana-doc-field">
+                <label>Status</label>
+                <span class={"arcana-status-badge #{if @config_info.loop.configured, do: "enabled", else: "disabled"}"}>
+                  <%= if @config_info.loop.configured, do: "Configured", else: "Defaults" %>
+                </span>
+              </div>
+              <div class="arcana-doc-field">
+                <label>Max Iterations</label>
+                <span><%= @config_info.loop.max_iterations %></span>
+              </div>
+              <div class="arcana-doc-field">
+                <label>Chunk Cap</label>
+                <span><%= @config_info.loop.chunk_cap %></span>
+              </div>
+              <%= if @config_info.loop.controller_llm do %>
+                <div class="arcana-doc-field">
+                  <label>Controller LLM</label>
+                  <span><%= inspect(@config_info.loop.controller_llm) %></span>
+                </div>
+              <% else %>
+                <div class="arcana-doc-field">
+                  <label>Controller LLM</label>
+                  <span style="color: #6b7280;">inherited from <code>config :arcana, :llm</code></span>
+                </div>
+              <% end %>
+              <div class="arcana-doc-field">
+                <label>Default Tools</label>
+                <span><code>search</code>, <code>answer</code>, <code>give_up</code></span>
               </div>
             </div>
           </div>
