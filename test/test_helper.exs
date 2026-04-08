@@ -1,19 +1,19 @@
-{:ok, _} = Arcana.TestRepo.start_link()
+{:ok, _} = Sorana.TestRepo.start_link()
 
 # Vacuum the database before starting sandbox mode to clear dead tuples from prior runs
 # This prevents performance degradation from accumulated dead tuples
-Ecto.Adapters.SQL.query!(Arcana.TestRepo, "VACUUM ANALYZE", [])
+Ecto.Adapters.SQL.query!(Sorana.TestRepo, "VACUUM ANALYZE", [])
 
-Ecto.Adapters.SQL.Sandbox.mode(Arcana.TestRepo, :manual)
+Ecto.Adapters.SQL.Sandbox.mode(Sorana.TestRepo, :manual)
 
 # Start the task supervisor used by LiveViews for async operations
 # (evaluation, Ask page submissions, maintenance tasks). Without this,
 # LiveView tests that trigger background tasks fail with "no process"
-# on Arcana.TaskSupervisor.
-{:ok, _} = Task.Supervisor.start_link(name: Arcana.TaskSupervisor)
+# on Sorana.TaskSupervisor.
+{:ok, _} = Task.Supervisor.start_link(name: Sorana.TaskSupervisor)
 
 # Start the endpoint for LiveView tests
-{:ok, _} = ArcanaWeb.Endpoint.start_link()
+{:ok, _} = SoranaWeb.Endpoint.start_link()
 
 # Exclude by default:
 # - :end_to_end - calls real LLM APIs

@@ -1,4 +1,4 @@
-defmodule Mix.Tasks.Arcana.Eval.Run do
+defmodule Mix.Tasks.Sorana.Eval.Run do
   @shortdoc "Run retrieval evaluation against test cases"
 
   @moduledoc """
@@ -68,7 +68,7 @@ defmodule Mix.Tasks.Arcana.Eval.Run do
       source_id: Keyword.get(opts, :source_id)
     ]
 
-    case Arcana.Evaluation.run(run_opts) do
+    case Sorana.Evaluation.run(run_opts) do
       {:ok, run} ->
         print_results(run, Keyword.get(opts, :format, "table"))
         check_threshold(run, Keyword.get(opts, :fail_under))
@@ -81,7 +81,7 @@ defmodule Mix.Tasks.Arcana.Eval.Run do
 
   defp maybe_generate(repo, opts) do
     if Keyword.get(opts, :generate) do
-      count = Arcana.Evaluation.count_test_cases(repo: repo)
+      count = Sorana.Evaluation.count_test_cases(repo: repo)
 
       if count == 0 do
         llm = Application.get_env(:arcana, :llm) || raise "Missing :arcana, :llm config"
@@ -90,7 +90,7 @@ defmodule Mix.Tasks.Arcana.Eval.Run do
         IO.puts("No test cases found. Generating #{sample_size}...")
 
         {:ok, test_cases} =
-          Arcana.Evaluation.generate_test_cases(
+          Sorana.Evaluation.generate_test_cases(
             repo: repo,
             llm: llm,
             sample_size: sample_size,

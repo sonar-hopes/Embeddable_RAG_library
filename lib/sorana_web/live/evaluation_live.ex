@@ -1,0 +1,493 @@
+defmodule SoranaWeb.EvaluationLive do
+  @moduledoc """
+  LiveView for retrieval evaluation in Sorana.
+  """
+  use Phoenix.LiveView
+
+  import SoranaWeb.DashboardComponents
+
+  alias Sorana.Evaluation
+
+  @impl true
+  def mount(_params, session, socket) do
+    repo = get_repo_from_session(session)
+
+    {:ok,
+     socket
+     |> assign(repo: repo)
+     |> assign(
+       eval_view: :test_cases,
+       eval_running: false,
+       eval_generating: false,
+       eval_message: nil,
+       stats: nil,
+       eval_test_cases: [],
+       eval_runs: [],
+       eval_test_case_count: 0,
+       collections: []
+     )}
+  end
+
+  @impl true
+  def handle_params(_params, _uri, socket) do
+    {:noreply, load_data(socket)}
+  end
+
+  defp load_data(socket) do
+    repo = socket.assigns.repo
+
+    socket
+    |> assign(stats: load_stats(repo))
+    |> load_evaluation_data()
+  end
+
+  defp load_evaluation_data(socket) do
+    repo = socket.assigns.repo
+
+    test_cases = Evaluation.list_test_cases(repo: repo)
+    runs = Evaluation.list_runs(repo: repo, limit: 10)
+    test_case_count = Evaluation.count_test_cases(repo: repo)
+    collections = load_collections(repo)
+
+    assign(socket,
+      eval_test_cases: test_cases,
+      eval_runs: runs,
+      eval_test_case_count: test_case_count,
+      collections: collections
+    )
+  end
+
+  @impl true
+  def handle_event("eval_switch_view", %{"view" => view}, socket) do
+    {:noreply, assign(socket, eval_view: parse_eval_view(view))}
+  end
+
+  def handle_event("eval_run", params, socket) do
+    repo = socket.assigns.repo
+    mode = parse_mode(params["mode"])
+    retriever_name = params["retriever"] || "pipeline"
+    evaluate_answers = params["evaluate_answers"] == "true"
+
+    # Check if LLM is configured when evaluate_answers or Loop is requested
+    llm = Application.get_env(:arcana, :llm)
+    needs_llm? = evaluate_answers or retriever_name == "loop"
+
+    if needs_llm? and is_nil(llm) do
+      {:noreply,
+       assign(socket,
+         eval_message: {:error, "No LLM configured. Set :arcana, :llm in your config."}
+       )}
+    else
+      socket = assign(socket, eval_running: true, eval_message: nil)
+      opts = build_run_opts(repo, mode, evaluate_answers, llm, retriever_name)
+
+      parent = self()
+
+      Task.Supervisor.start_child(Sorana.TaskSupervisor, fn ->
+        result = Evaluation.run(opts)
+        send(parent, {:eval_run_complete, result})
+      end)
+
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("eval_generate", params, socket) do
+    repo = socket.assigns.repo
+    sample_size = parse_int(params["sample_size"], 10)
+    collection = blank_to_nil(params["collection"])
+
+    case Application.get_env(:arcana, :llm) do
+      nil ->
+        {:noreply,
+         assign(socket,
+           eval_message: {:error, "No LLM configured. Set :arcana, :llm in your config."}
+         )}
+
+      llm ->
+        socket = assign(socket, eval_generating: true, eval_message: nil)
+
+        parent = self()
+        opts = build_generate_opts(repo, llm, sample_size, collection)
+
+        Task.Supervisor.start_child(Sorana.TaskSupervisor, fn ->
+          result = Evaluation.generate_test_cases(opts)
+          send(parent, {:eval_generate_complete, result})
+        end)
+
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("eval_delete_test_case", %{"id" => id}, socket) do
+    repo = socket.assigns.repo
+
+    case Evaluation.delete_test_case(id, repo: repo) do
+      {:ok, _} -> {:noreply, load_evaluation_data(socket)}
+      {:error, _} -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("eval_delete_run", %{"id" => id}, socket) do
+    repo = socket.assigns.repo
+
+    case Evaluation.delete_run(id, repo: repo) do
+      {:ok, _} -> {:noreply, load_evaluation_data(socket)}
+      {:error, _} -> {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_info({:eval_run_complete, result}, socket) do
+    socket =
+      case result do
+        {:ok, _run} ->
+          socket
+          |> assign(eval_running: false, eval_message: {:success, "Evaluation completed!"})
+          |> load_evaluation_data()
+          |> assign(eval_view: :history)
+
+        {:error, :no_test_cases} ->
+          assign(socket,
+            eval_running: false,
+            eval_message: {:error, "No test cases. Generate some first."}
+          )
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_info({:eval_generate_complete, result}, socket) do
+    socket =
+      case result do
+        {:ok, test_cases} ->
+          socket
+          |> assign(
+            eval_generating: false,
+            eval_message: {:success, "Generated #{length(test_cases)} test case(s)!"}
+          )
+          |> load_evaluation_data()
+
+        {:error, reason} ->
+          assign(socket,
+            eval_generating: false,
+            eval_message: {:error, "Generation failed: #{inspect(reason)}"}
+          )
+      end
+
+    {:noreply, socket}
+  end
+
+  defp build_run_opts(repo, mode, evaluate_answers, llm, retriever_name) do
+    base =
+      [repo: repo, mode: mode]
+      |> maybe_put_evaluate_answers(evaluate_answers, llm)
+      |> maybe_put_retriever(retriever_name, repo, llm)
+
+    base
+  end
+
+  defp maybe_put_evaluate_answers(opts, false, _llm), do: opts
+
+  defp maybe_put_evaluate_answers(opts, true, llm) do
+    Keyword.merge(opts, evaluate_answers: true, llm: llm)
+  end
+
+  # Pipeline is the default — no :retriever needed, Sorana.Evaluation.run/1
+  # falls back to &Sorana.search/2.
+  defp maybe_put_retriever(opts, "pipeline", _repo, _llm), do: opts
+
+  defp maybe_put_retriever(opts, "loop", repo, llm) do
+    # Loop retriever: run a full Sorana.Loop.run/2 per test case and
+    # return the 3-tuple {:ok, chunks, answer}. The answer is the one
+    # the loop produced, so when evaluate_answers: true is on, the
+    # existing machinery skips regeneration and scores it directly.
+    runner = loop_runner()
+
+    retriever = fn question, _opts ->
+      ctx = Sorana.Loop.new(question, repo: repo)
+
+      case runner.(ctx, controller_llm: llm) do
+        {:ok, %Sorana.Loop.Context{} = result_ctx} ->
+          {:ok, result_ctx.chunks, result_ctx.answer}
+
+        {:error, _} = err ->
+          err
+      end
+    end
+
+    Keyword.put(opts, :retriever, retriever)
+  end
+
+  # Testability seam — same pattern used in ask_live.ex so tests can
+  # stub Loop execution without spinning up a real controller.
+  defp loop_runner do
+    Application.get_env(:arcana, :loop_runner) || (&Sorana.Loop.run/2)
+  end
+
+  defp build_generate_opts(repo, llm, sample_size, nil) do
+    [repo: repo, llm: llm, sample_size: sample_size]
+  end
+
+  defp build_generate_opts(repo, llm, sample_size, collection) do
+    [repo: repo, llm: llm, sample_size: sample_size, collection: collection]
+  end
+
+  defp parse_eval_view("test_cases"), do: :test_cases
+  defp parse_eval_view("run"), do: :run
+  defp parse_eval_view("history"), do: :history
+  # Any other value (an unknown view name from a stale tab or a malformed
+  # phx-value-view payload) falls back to the default landing.
+  defp parse_eval_view(_), do: :test_cases
+
+  @impl true
+  def render(assigns) do
+    ~H"""
+    <.dashboard_layout stats={@stats} current_tab={:evaluation}>
+      <div class="arcana-evaluation">
+        <h2>Evaluation</h2>
+        <p class="arcana-tab-description">
+          Test retrieval quality with test cases and measure recall and precision metrics.
+        </p>
+
+        <div class="arcana-eval-nav">
+          <button
+            class={"arcana-eval-nav-btn #{if @eval_view == :test_cases, do: "active", else: ""}"}
+            phx-click="eval_switch_view"
+            phx-value-view="test_cases"
+          >
+            Test Cases (<%= @eval_test_case_count %>)
+          </button>
+          <button
+            class={"arcana-eval-nav-btn #{if @eval_view == :run, do: "active", else: ""}"}
+            phx-click="eval_switch_view"
+            phx-value-view="run"
+          >
+            Run Evaluation
+          </button>
+          <button
+            class={"arcana-eval-nav-btn #{if @eval_view == :history, do: "active", else: ""}"}
+            phx-click="eval_switch_view"
+            phx-value-view="history"
+          >
+            History (<%= length(@eval_runs) %>)
+          </button>
+        </div>
+
+        <%= if @eval_message do %>
+          <div class={"arcana-eval-message #{elem(@eval_message, 0)}"}>
+            <%= elem(@eval_message, 1) %>
+          </div>
+        <% end %>
+
+        <%= case @eval_view do %>
+          <% :test_cases -> %>
+            <.eval_test_cases_view test_cases={@eval_test_cases} generating={@eval_generating} collections={@collections} />
+          <% :run -> %>
+            <.eval_run_view running={@eval_running} test_case_count={@eval_test_case_count} />
+          <% :history -> %>
+            <.eval_history_view runs={@eval_runs} />
+        <% end %>
+      </div>
+    </.dashboard_layout>
+    """
+  end
+
+  defp eval_test_cases_view(assigns) do
+    ~H"""
+    <div class="arcana-eval-test-cases">
+      <form phx-submit="eval_generate" class="arcana-run-form" style="margin-bottom: 1.5rem;">
+        <label>
+          Collection
+          <select name="collection">
+            <option value="">All collections</option>
+            <%= for col <- @collections do %>
+              <option value={col.name}><%= col.name %></option>
+            <% end %>
+          </select>
+        </label>
+
+        <label>
+          Sample Size
+          <select name="sample_size">
+            <option value="5">5</option>
+            <option value="10" selected>10</option>
+            <option value="25">25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </label>
+
+        <button type="submit" disabled={@generating}>
+          <%= if @generating, do: "Generating...", else: "Generate Test Cases" %>
+        </button>
+
+        <span style="font-size: 0.75rem; color: #6b7280; align-self: center;">
+          Samples random chunks and uses the configured LLM to generate questions
+        </span>
+      </form>
+
+      <%= if Enum.empty?(@test_cases) do %>
+        <p class="arcana-empty">
+          No test cases yet. Click "Generate Test Cases" above or use the API.
+        </p>
+      <% else %>
+        <%= for tc <- @test_cases do %>
+          <div class="arcana-test-case">
+            <div class="arcana-test-case-header">
+              <span class="arcana-test-case-question"><%= tc.question %></span>
+              <button
+                class="arcana-delete-btn"
+                phx-click="eval_delete_test_case"
+                phx-value-id={tc.id}
+                title="Delete test case"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  <line x1="10" y1="11" x2="10" y2="17"></line>
+                  <line x1="14" y1="11" x2="14" y2="17"></line>
+                </svg>
+              </button>
+            </div>
+            <div class="arcana-test-case-meta">
+              <span class={"arcana-test-case-badge #{tc.source}"}><%= tc.source %></span>
+              <span><%= length(tc.relevant_chunks) %> relevant chunk(s)</span>
+              <span><%= tc.inserted_at %></span>
+            </div>
+          </div>
+        <% end %>
+      <% end %>
+    </div>
+    """
+  end
+
+  defp eval_run_view(assigns) do
+    ~H"""
+    <div class="arcana-eval-run">
+      <p style="margin-bottom: 1rem; color: #6b7280;">
+        Run evaluation against your <%= @test_case_count %> test case(s) to measure retrieval quality.
+      </p>
+
+      <form phx-submit="eval_run" class="arcana-run-form">
+        <fieldset class="arcana-eval-retriever">
+          <legend>Retriever</legend>
+          <label class="arcana-checkbox-label">
+            <input type="radio" name="retriever" value="pipeline" checked />
+            <span>Pipeline</span>
+            <small>Modular RAG via <code>Sorana.search/2</code>. Fast, deterministic.</small>
+          </label>
+          <label class="arcana-checkbox-label">
+            <input type="radio" name="retriever" value="loop" />
+            <span>Loop</span>
+            <small>
+              Agentic RAG via <code>Sorana.Loop</code>. LLM picks tools each turn.
+              Much slower, needs LLM configured.
+            </small>
+          </label>
+        </fieldset>
+
+        <label>
+          Search Mode
+          <select name="mode">
+            <option value="semantic">Semantic</option>
+            <option value="fulltext">Full-text</option>
+            <option value="hybrid">Hybrid</option>
+          </select>
+          <small style="display: block; color: #6b7280;">
+            Only used by the Pipeline retriever. Loop always uses semantic.
+          </small>
+        </label>
+
+        <label style="display: flex; align-items: center; gap: 0.5rem;">
+          <input type="checkbox" name="evaluate_answers" value="true" />
+          Evaluate Answers
+          <span style="font-size: 0.75rem; color: #6b7280;">
+            (requires LLM. Scores faithfulness, plus correctness against reference_answer when present.)
+          </span>
+        </label>
+
+        <button type="submit" disabled={@running or @test_case_count == 0}>
+          <%= if @running, do: "Running...", else: "Run Evaluation" %>
+        </button>
+      </form>
+
+      <%= if @test_case_count == 0 do %>
+        <p class="arcana-empty">
+          No test cases available. Generate some first using <code>mix arcana.eval.generate</code>.
+        </p>
+      <% end %>
+    </div>
+    """
+  end
+
+  defp eval_history_view(assigns) do
+    ~H"""
+    <div class="arcana-eval-history">
+      <%= if Enum.empty?(@runs) do %>
+        <p class="arcana-empty">No evaluation runs yet. Run an evaluation to see results here.</p>
+      <% else %>
+        <%= for run <- @runs do %>
+          <div class="arcana-run-card">
+            <div class="arcana-run-header">
+              <div class="arcana-run-header-left">
+                <span class={"arcana-run-status #{run.status}"}><%= run.status %></span>
+                <span style="font-size: 0.875rem; color: #374151;">
+                  <%= run.test_case_count %> test cases
+                </span>
+              </div>
+              <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <span style="font-size: 0.75rem; color: #6b7280;"><%= run.inserted_at %></span>
+                <button
+                  style="background: transparent; color: #dc2626; border: 1px solid #dc2626; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; cursor: pointer;"
+                  phx-click="eval_delete_run"
+                  phx-value-id={run.id}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+            <div class="arcana-run-body">
+              <div class="arcana-run-config">
+                Mode: <strong><%= run.config["mode"] || run.config[:mode] || "semantic" %></strong>
+              </div>
+              <%= if run.status == :completed and run.metrics do %>
+                <div class="arcana-metrics-grid">
+                  <div class="arcana-metric-card">
+                    <div class="arcana-metric-value"><%= format_pct(run.metrics["recall_at_5"] || run.metrics[:recall_at_5]) %></div>
+                    <div class="arcana-metric-label">Recall@5</div>
+                  </div>
+                  <div class="arcana-metric-card">
+                    <div class="arcana-metric-value"><%= format_pct(run.metrics["precision_at_5"] || run.metrics[:precision_at_5]) %></div>
+                    <div class="arcana-metric-label">Precision@5</div>
+                  </div>
+                  <div class="arcana-metric-card">
+                    <div class="arcana-metric-value"><%= format_pct(run.metrics["mrr"] || run.metrics[:mrr]) %></div>
+                    <div class="arcana-metric-label">MRR</div>
+                  </div>
+                  <div class="arcana-metric-card">
+                    <div class="arcana-metric-value"><%= format_pct(run.metrics["hit_rate_at_5"] || run.metrics[:hit_rate_at_5]) %></div>
+                    <div class="arcana-metric-label">Hit Rate@5</div>
+                  </div>
+                  <%= if run.metrics["faithfulness"] || run.metrics[:faithfulness] do %>
+                    <div class="arcana-metric-card">
+                      <div class="arcana-metric-value"><%= format_score(run.metrics["faithfulness"] || run.metrics[:faithfulness]) %></div>
+                      <div class="arcana-metric-label">Faithfulness</div>
+                    </div>
+                  <% end %>
+                  <%= if run.metrics["correctness"] || run.metrics[:correctness] do %>
+                    <div class="arcana-metric-card">
+                      <div class="arcana-metric-value"><%= format_score(run.metrics["correctness"] || run.metrics[:correctness]) %></div>
+                      <div class="arcana-metric-label">Correctness</div>
+                    </div>
+                  <% end %>
+                </div>
+              <% end %>
+            </div>
+          </div>
+        <% end %>
+      <% end %>
+    </div>
+    """
+  end
+end

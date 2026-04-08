@@ -9,7 +9,7 @@ Re-ranking is a second-stage retrieval step that scores each chunk based on rele
 ## Using Re-ranking in the Pipeline
 
 ```elixir
-alias Arcana.Pipeline
+alias Sorana.Pipeline
 
 llm = fn prompt -> {:ok, LangChain.chat(prompt)} end
 
@@ -62,13 +62,13 @@ Pipeline.rerank(ctx, prompt: custom_prompt)
 
 ### Implementing the Behaviour
 
-Create a custom reranker by implementing `Arcana.Reranker`:
+Create a custom reranker by implementing `Sorana.Reranker`:
 
 ```elixir
 defmodule MyApp.CrossEncoderReranker do
-  @behaviour Arcana.Reranker
+  @behaviour Sorana.Reranker
 
-  @impl Arcana.Reranker
+  @impl Sorana.Reranker
   def rerank(question, chunks, opts) do
     threshold = Keyword.get(opts, :threshold, 0.5)
 
@@ -112,7 +112,7 @@ end)
 
 ## Built-in Rerankers
 
-### Arcana.Reranker.LLM (Default)
+### Sorana.Reranker.LLM (Default)
 
 Uses your LLM to score each chunk:
 
@@ -121,9 +121,9 @@ Uses your LLM to score each chunk:
 3. Filters chunks below threshold
 4. Sorts by score descending
 
-This is the default when you call `Arcana.Pipeline.rerank/2`.
+This is the default when you call `Sorana.Pipeline.rerank/2`.
 
-### Arcana.Reranker.ColBERT
+### Sorana.Reranker.ColBERT
 
 ColBERT-style neural reranking using per-token embeddings and MaxSim scoring. Provides more nuanced relevance scoring than single-vector methods by matching individual query tokens to document tokens.
 
@@ -136,10 +136,10 @@ Add the optional dependency:
 Use it:
 
 ```elixir
-Pipeline.rerank(ctx, reranker: Arcana.Reranker.ColBERT)
+Pipeline.rerank(ctx, reranker: Sorana.Reranker.ColBERT)
 
 # With options
-Pipeline.rerank(ctx, reranker: {Arcana.Reranker.ColBERT, top_k: 5})
+Pipeline.rerank(ctx, reranker: {Sorana.Reranker.ColBERT, top_k: 5})
 ```
 
 **Options:**
@@ -170,7 +170,7 @@ Re-ranking emits telemetry events:
 ```elixir
 :telemetry.attach(
   "rerank-logger",
-  [:arcana, :pipeline, :rerank, :stop],
+  [:sorana, :pipeline, :rerank, :stop],
   fn _event, measurements, metadata, _config ->
     IO.puts("Reranked: #{metadata.chunks_before} -> #{metadata.chunks_after} chunks")
   end,

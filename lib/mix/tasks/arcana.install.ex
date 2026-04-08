@@ -1,8 +1,8 @@
 if Code.ensure_loaded?(Igniter) do
-  defmodule Mix.Tasks.Arcana.Install do
-    @shortdoc "Installs Arcana in your Phoenix application"
+  defmodule Mix.Tasks.Sorana.Install do
+    @shortdoc "Installs Sorana in your Phoenix application"
     @moduledoc """
-    Installs Arcana in your Phoenix application.
+    Installs Sorana in your Phoenix application.
 
         $ mix arcana.install
 
@@ -60,36 +60,36 @@ if Code.ensure_loaded?(Igniter) do
       |> maybe_add_dashboard_route(opts[:dashboard], web_module)
       |> Igniter.add_notice("""
 
-      Arcana installed successfully!
+      Sorana installed successfully!
 
       Next steps:
       1. Run the migration: mix ecto.migrate
 
-      2. Add Arcana to your supervision tree:
+      2. Add Sorana to your supervision tree:
 
           children = [
             #{inspect(repo_module)},
-            Arcana.Embedder.Local,
-            Arcana.TaskSupervisor
+            Sorana.Embedder.Local,
+            Sorana.TaskSupervisor
           ]
 
          For in-memory vector store (no PostgreSQL required), also add:
 
-            {Arcana.VectorStore.Memory, name: Arcana.VectorStore.Memory}
+            {Sorana.VectorStore.Memory, name: Sorana.VectorStore.Memory}
 
          And configure: config :arcana, vector_store: :memory
 
       3. (Optional) Enable telemetry logging for observability:
 
           # In your application's start/2, before Supervisor.start_link
-          Arcana.Telemetry.Logger.attach()
+          Sorana.Telemetry.Logger.attach()
 
          See the Telemetry guide for Prometheus/LiveDashboard integration.
 
-      4. Start using Arcana:
+      4. Start using Sorana:
 
-          {:ok, doc} = Arcana.ingest("Your content", repo: #{inspect(repo_module)})
-          {:ok, results} = Arcana.search("query", repo: #{inspect(repo_module)})
+          {:ok, doc} = Sorana.ingest("Your content", repo: #{inspect(repo_module)})
+          {:ok, results} = Sorana.search("query", repo: #{inspect(repo_module)})
       """)
     end
 
@@ -107,7 +107,7 @@ if Code.ensure_loaded?(Igniter) do
       path = Path.join(migrations_path, filename)
 
       migration_content = """
-      defmodule #{inspect(repo_module)}.Migrations.CreateArcanaTables do
+      defmodule #{inspect(repo_module)}.Migrations.CreateSoranaTables do
         use Ecto.Migration
 
         def up do
@@ -251,16 +251,16 @@ if Code.ensure_loaded?(Igniter) do
 
       IMPORTANT: Add this import to the top of your router (#{inspect(router_module)}):
 
-          import ArcanaWeb.Router
+          import SoranaWeb.Router
 
       """)
     end
   end
 else
-  defmodule Mix.Tasks.Arcana.Install do
-    @shortdoc "Generates Arcana migrations for your application"
+  defmodule Mix.Tasks.Sorana.Install do
+    @shortdoc "Generates Sorana migrations for your application"
     @moduledoc """
-    Generates the migration file needed for Arcana.
+    Generates the migration file needed for Sorana.
 
         $ mix arcana.install
 
@@ -281,7 +281,7 @@ else
     import Mix.Generator
 
     @migration_template """
-    defmodule <%= @repo %>.Migrations.CreateArcanaTables do
+    defmodule <%= @repo %>.Migrations.CreateSoranaTables do
       use Ecto.Migration
 
       def up do
@@ -396,22 +396,22 @@ else
 
       Mix.shell().info("""
 
-      Arcana migration created!
+      Sorana migration created!
 
       Next steps:
       1. Run the migration: mix ecto.migrate
 
-      2. Add Arcana to your supervision tree:
+      2. Add Sorana to your supervision tree:
 
           children = [
             MyApp.Repo,
-            Arcana.Embedder.Local,
-            Arcana.TaskSupervisor
+            Sorana.Embedder.Local,
+            Sorana.TaskSupervisor
           ]
 
          For in-memory vector store (no PostgreSQL required), also add:
 
-            {Arcana.VectorStore.Memory, name: Arcana.VectorStore.Memory}
+            {Sorana.VectorStore.Memory, name: Sorana.VectorStore.Memory}
 
          And configure: config :arcana, vector_store: :memory
 
@@ -432,7 +432,7 @@ else
       5. (Optional) Mount the dashboard in your router:
 
           # At the top of your router
-          import ArcanaWeb.Router
+          import SoranaWeb.Router
 
           # In a scope with the :browser pipeline
           scope "/" do
@@ -444,7 +444,7 @@ else
       6. (Optional) Enable telemetry logging for observability:
 
           # In your application's start/2, before Supervisor.start_link
-          Arcana.Telemetry.Logger.attach()
+          Sorana.Telemetry.Logger.attach()
 
          See the Telemetry guide for Prometheus/LiveDashboard integration.
 

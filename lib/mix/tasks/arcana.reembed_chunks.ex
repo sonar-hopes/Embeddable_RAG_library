@@ -1,4 +1,4 @@
-defmodule Mix.Tasks.Arcana.ReembedChunks do
+defmodule Mix.Tasks.Sorana.ReembedChunks do
   @moduledoc """
   Re-embeds all chunks with the current embedding configuration.
 
@@ -66,7 +66,7 @@ defmodule Mix.Tasks.Arcana.ReembedChunks do
     end
 
     # Show current embedding info
-    info = Arcana.Maintenance.embedding_info()
+    info = Sorana.Maintenance.embedding_info()
     Mix.shell().info("Embedding config: #{format_info(info)}")
 
     # Build progress callback
@@ -92,7 +92,7 @@ defmodule Mix.Tasks.Arcana.ReembedChunks do
       if collection, do: Keyword.put(reembed_opts, :collection, collection), else: reembed_opts
 
     {:ok, %{rechunked_documents: docs, total_chunks: total, skipped: skipped}} =
-      Arcana.Maintenance.reembed(repo, reembed_opts)
+      Sorana.Maintenance.reembed(repo, reembed_opts)
 
     unless quiet, do: IO.puts("")
 

@@ -1,4 +1,4 @@
-defmodule Mix.Tasks.Arcana.Graph.EmbedEntities do
+defmodule Mix.Tasks.Sorana.Graph.EmbedEntities do
   @moduledoc """
   Generates embeddings for entity descriptions.
 
@@ -67,7 +67,7 @@ defmodule Mix.Tasks.Arcana.Graph.EmbedEntities do
       end
 
     {:ok, %{total: total}} =
-      Arcana.Maintenance.embed_entities(repo,
+      Sorana.Maintenance.embed_entities(repo,
         collection: collection,
         batch_size: batch_size,
         force: force,

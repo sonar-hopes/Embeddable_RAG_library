@@ -1,6 +1,6 @@
 # LLM Integration
 
-This guide shows how to use Arcana with [Req.LLM](https://hex.pm/packages/req_llm) for production-ready RAG applications.
+This guide shows how to use Sorana with [Req.LLM](https://hex.pm/packages/req_llm) for production-ready RAG applications.
 
 ## Setup
 
@@ -9,7 +9,7 @@ Add `req_llm` to your dependencies:
 ```elixir
 def deps do
   [
-    {:arcana, "~> 1.0"},
+    {:sorana, "~> 1.0"},
     {:req_llm, "~> 1.2"}
   ]
 end
@@ -24,19 +24,19 @@ config :req_llm, :openai, api_key: System.get_env("OPENAI_API_KEY")
 config :req_llm, :anthropic, api_key: System.get_env("ANTHROPIC_API_KEY")
 ```
 
-## Basic RAG with Arcana.ask/2
+## Basic RAG with Sorana.ask/2
 
-Pass a model string directly to `Arcana.ask/2`:
+Pass a model string directly to `Sorana.ask/2`:
 
 ```elixir
 # OpenAI
-{:ok, answer} = Arcana.ask("What is Elixir?",
+{:ok, answer} = Sorana.ask("What is Elixir?",
   repo: MyApp.Repo,
   llm: "openai:gpt-4o-mini"
 )
 
 # Anthropic
-{:ok, answer} = Arcana.ask("What is Elixir?",
+{:ok, answer} = Sorana.ask("What is Elixir?",
   repo: MyApp.Repo,
   llm: "anthropic:claude-sonnet-4-20250514"
 )
@@ -61,7 +61,7 @@ custom_prompt = fn question, context ->
   """
 end
 
-{:ok, answer} = Arcana.ask("What is Elixir?",
+{:ok, answer} = Sorana.ask("What is Elixir?",
   repo: MyApp.Repo,
   llm: "openai:gpt-4o-mini",
   prompt: custom_prompt,
@@ -71,7 +71,7 @@ end
 
 ## Custom RAG Module
 
-Wrap Arcana in a module for cleaner usage:
+Wrap Sorana in a module for cleaner usage:
 
 ```elixir
 defmodule MyApp.RAG do
@@ -94,14 +94,14 @@ defmodule MyApp.RAG do
     search_opts =
       if source_id, do: Keyword.put(search_opts, :source_id, source_id), else: search_opts
 
-    Arcana.ask(question, search_opts)
+    Sorana.ask(question, search_opts)
   end
 
   def search(query, opts \\ []) do
     repo = Keyword.get(opts, :repo, MyApp.Repo)
     limit = Keyword.get(opts, :limit, @default_limit)
 
-    case Arcana.search(query, repo: repo, limit: limit, mode: :hybrid) do
+    case Sorana.search(query, repo: repo, limit: limit, mode: :hybrid) do
       {:ok, results} -> results
       {:error, _reason} -> []
     end
@@ -111,15 +111,15 @@ end
 
 ## Streaming Responses
 
-For real-time streaming in LiveView, use Req.LLM's streaming directly with Arcana's search:
+For real-time streaming in LiveView, use Req.LLM's streaming directly with Sorana's search:
 
 ```elixir
 defmodule MyAppWeb.ChatLive do
   use MyAppWeb, :live_view
 
   def handle_event("ask", %{"question" => question}, socket) do
-    # Get context from Arcana
-    {:ok, context} = Arcana.search(question, repo: MyApp.Repo, limit: 5)
+    # Get context from Sorana
+    {:ok, context} = Sorana.search(question, repo: MyApp.Repo, limit: 5)
     context_text = Enum.map_join(context, "\n\n", & &1.text)
 
     # Stream the response
@@ -168,17 +168,17 @@ end
 
 ## Pipeline (Modular RAG)
 
-For complex questions, use `Arcana.Pipeline`. See the [Pipeline guide](pipeline.md) for the full reference.
+For complex questions, use `Sorana.Pipeline`. See the [Pipeline guide](pipeline.md) for the full reference.
 
 ```elixir
 llm = fn prompt -> ReqLLM.generate_text!("openai:gpt-4o-mini", prompt) end
 
 ctx =
-  Arcana.Pipeline.new("Compare Elixir and Erlang features", repo: MyApp.Repo, llm: llm)
-  |> Arcana.Pipeline.select(collections: ["elixir-docs", "erlang-docs"])
-  |> Arcana.Pipeline.decompose()
-  |> Arcana.Pipeline.search(self_correct: true)
-  |> Arcana.Pipeline.answer()
+  Sorana.Pipeline.new("Compare Elixir and Erlang features", repo: MyApp.Repo, llm: llm)
+  |> Sorana.Pipeline.select(collections: ["elixir-docs", "erlang-docs"])
+  |> Sorana.Pipeline.decompose()
+  |> Sorana.Pipeline.search(self_correct: true)
+  |> Sorana.Pipeline.answer()
 
 ctx.answer
 ```

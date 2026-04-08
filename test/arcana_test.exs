@@ -1,10 +1,10 @@
-defmodule ArcanaTest do
-  use Arcana.DataCase, async: true
+defmodule SoranaTest do
+  use Sorana.DataCase, async: true
 
   describe "ask/2" do
     setup do
       {:ok, _doc} =
-        Arcana.ingest(
+        Sorana.ingest(
           "The capital of France is Paris. Paris is known for the Eiffel Tower.",
           repo: Repo
         )
@@ -12,13 +12,13 @@ defmodule ArcanaTest do
       :ok
     end
 
-    test "works with any type implementing Arcana.LLM protocol" do
+    test "works with any type implementing Sorana.LLM protocol" do
       # Anonymous function implements the protocol via Function
       llm = fn prompt, context ->
         {:ok, "Answer to: #{prompt} with #{length(context)} chunks"}
       end
 
-      {:ok, answer, _results} = Arcana.ask("What is the capital?", repo: Repo, llm: llm)
+      {:ok, answer, _results} = Sorana.ask("What is the capital?", repo: Repo, llm: llm)
 
       assert answer =~ "What is the capital?"
       assert answer =~ "chunks"
@@ -30,7 +30,7 @@ defmodule ArcanaTest do
       model = "openai:gpt-4o-mini"
 
       # This should not raise - the protocol implementation exists
-      assert Arcana.LLM.impl_for(model) != nil
+      assert Sorana.LLM.impl_for(model) != nil
     end
 
     test "returns answer using retrieved context" do
@@ -40,7 +40,7 @@ defmodule ArcanaTest do
       end
 
       {:ok, answer, _results} =
-        Arcana.ask("What is the capital of France?",
+        Sorana.ask("What is the capital of France?",
           repo: Repo,
           llm: test_llm
         )
@@ -58,7 +58,7 @@ defmodule ArcanaTest do
       end
 
       {:ok, _answer, _results} =
-        Arcana.ask("Tell me about Paris",
+        Sorana.ask("Tell me about Paris",
           repo: Repo,
           llm: test_llm
         )
@@ -72,7 +72,7 @@ defmodule ArcanaTest do
     end
 
     test "returns error when no LLM configured" do
-      assert {:error, :no_llm_configured} = Arcana.ask("test", repo: Repo)
+      assert {:error, :no_llm_configured} = Sorana.ask("test", repo: Repo)
     end
 
     test "respects search options like limit and threshold" do
@@ -84,7 +84,7 @@ defmodule ArcanaTest do
       end
 
       {:ok, _, _} =
-        Arcana.ask("Paris",
+        Sorana.ask("Paris",
           repo: Repo,
           llm: test_llm,
           limit: 1
@@ -107,7 +107,7 @@ defmodule ArcanaTest do
       end
 
       {:ok, _, _} =
-        Arcana.ask("What is Paris?",
+        Sorana.ask("What is Paris?",
           repo: Repo,
           llm: test_llm,
           prompt: custom_prompt

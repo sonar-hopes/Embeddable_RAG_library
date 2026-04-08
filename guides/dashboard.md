@@ -6,13 +6,13 @@ A web UI for managing documents and testing search. The dashboard consists of mu
 
 ### 1. Add TaskSupervisor to your supervision tree
 
-The dashboard requires `Arcana.TaskSupervisor` for async operations (Ask, Maintenance):
+The dashboard requires `Sorana.TaskSupervisor` for async operations (Ask, Maintenance):
 
 ```elixir
 # lib/my_app/application.ex
 children = [
   MyApp.Repo,
-  Arcana.TaskSupervisor,  # Required for dashboard
+  Sorana.TaskSupervisor,  # Required for dashboard
   # ...
 ]
 ```
@@ -21,21 +21,21 @@ children = [
 
 ```elixir
 # lib/my_app_web/router.ex
-import ArcanaWeb.Router
+import SoranaWeb.Router
 
 scope "/" do
   pipe_through :browser
 
-  arcana_dashboard "/arcana"
+  sorana_dashboard "/sorana"
 end
 ```
 
-Visit `http://localhost:4000/arcana` to access the dashboard (redirects to Documents page).
+Visit `http://localhost:4000/sorana` to access the dashboard (redirects to Documents page).
 
 ## Options
 
 ```elixir
-arcana_dashboard "/arcana",
+sorana_dashboard "/sorana",
   repo: MyApp.Repo,                    # Override repo
   on_mount: [MyAppWeb.Auth],           # Add authentication
   live_socket_path: "/live"            # Custom LiveView socket path
@@ -46,13 +46,13 @@ arcana_dashboard "/arcana",
 Protect the dashboard with your existing authentication:
 
 ```elixir
-arcana_dashboard "/arcana",
+sorana_dashboard "/sorana",
   on_mount: [MyAppWeb.RequireAdmin]
 ```
 
 ## Pages
 
-### Documents (`/arcana/documents`)
+### Documents (`/sorana/documents`)
 
 - **View documents** - Browse all ingested documents with pagination
 - **View chunks** - See how documents are chunked
@@ -60,43 +60,43 @@ arcana_dashboard "/arcana",
 - **Upload files** - Upload `.txt`, `.md`, or `.pdf` files
 - **Filter by collection** - View documents from specific collections
 
-### Ask (`/arcana/ask`)
+### Ask (`/sorana/ask`)
 
 - **Simple mode** - Basic RAG question answering
 - **Agentic mode** - Full pipeline with query expansion, decomposition, and self-correction
 - **Collection selection** - Choose which collections to search (or let the LLM select)
 - **Pipeline options** - Toggle expand, decompose, rerank, and self-correct steps
 
-### Search (`/arcana/search`)
+### Search (`/sorana/search`)
 
 - **Test queries** - Try searches against your documents
 - **View results** - See retrieved chunks with similarity scores and expandable details
 - **Compare modes** - Test semantic, full-text, and hybrid search
 - **Filter by collection** - Search within specific collections
 
-### Collections (`/arcana/collections`)
+### Collections (`/sorana/collections`)
 
 - **View collections** - Browse all collections with document counts
 - **Create collections** - Add new collections with descriptions
 - **Edit collections** - Update collection descriptions
 - **Delete collections** - Remove empty collections
 
-### Evaluation (`/arcana/evaluation`)
+### Evaluation (`/sorana/evaluation`)
 
 - **View test cases** - See questions and their relevant chunks
 - **Run evaluations** - Execute evaluation runs
 - **View metrics** - See MRR, Precision, Recall scores
 - **Compare runs** - Track changes over time
 
-### Maintenance (`/arcana/maintenance`)
+### Maintenance (`/sorana/maintenance`)
 
 - **Rebuild embeddings** - Re-embed all chunks (useful after model changes)
 - **Orphan cleanup** - Find and remove chunks without parent documents
 - **Database operations** - Maintenance tasks for the vector store
 
-### Info (`/arcana/info`)
+### Info (`/sorana/info`)
 
-- **Configuration** - View current Arcana settings
+- **Configuration** - View current Sorana settings
 - **Embedding model** - See which model is in use
 - **Statistics** - Document and chunk counts
 
@@ -117,7 +117,7 @@ Dashboard assets (CSS, JS) are served inline - no build step required.
 
 ## Security Considerations
 
-The dashboard provides full access to your Arcana data:
+The dashboard provides full access to your Sorana data:
 
 1. **Always add authentication** in production
 2. **Restrict to admin users** who need access

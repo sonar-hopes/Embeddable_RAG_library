@@ -1,4 +1,4 @@
-defmodule Mix.Tasks.Arcana.Gen.EmbeddingMigration do
+defmodule Mix.Tasks.Sorana.Gen.EmbeddingMigration do
   @moduledoc """
   Generates a migration to update vector column dimensions.
 
@@ -52,8 +52,8 @@ defmodule Mix.Tasks.Arcana.Gen.EmbeddingMigration do
   end
 
   defp detect_dimensions do
-    embedder = Arcana.embedder()
-    {:ok, Arcana.Embedder.dimensions(embedder)}
+    embedder = Sorana.embedder()
+    {:ok, Sorana.Embedder.dimensions(embedder)}
   rescue
     e -> {:error, e}
   end
@@ -98,7 +98,7 @@ defmodule Mix.Tasks.Arcana.Gen.EmbeddingMigration do
 
   defp migration_content(dimensions) do
     """
-    defmodule Arcana.Repo.Migrations.UpdateEmbeddingDimensions do
+    defmodule Sorana.Repo.Migrations.UpdateEmbeddingDimensions do
       use Ecto.Migration
 
       def up do

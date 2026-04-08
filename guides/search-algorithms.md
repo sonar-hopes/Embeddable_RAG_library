@@ -1,6 +1,6 @@
 # Search Algorithms
 
-Arcana supports three search modes across two vector store backends. This guide explains how each algorithm works under the hood.
+Sorana supports three search modes across two vector store backends. This guide explains how each algorithm works under the hood.
 
 ## Search Modes Overview
 
@@ -37,7 +37,7 @@ Uses PostgreSQL's pgvector extension with HNSW indexing.
 
 ```sql
 SELECT *, 1 - (embedding <=> query_embedding) AS score
-FROM arcana_chunks
+FROM sorana_chunks
 ORDER BY embedding <=> query_embedding
 LIMIT 10
 ```
@@ -92,7 +92,7 @@ Uses PostgreSQL's battle-tested full-text search with `tsvector` and `tsquery`:
 ```sql
 SELECT *,
   ts_rank(to_tsvector('english', text), to_tsquery('english', 'elixir & pattern & matching')) AS score
-FROM arcana_chunks
+FROM sorana_chunks
 WHERE to_tsvector('english', text) @@ to_tsquery('english', 'elixir & pattern & matching')
 ORDER BY score DESC
 ```
@@ -139,7 +139,7 @@ WITH base_scores AS (
     id, text, embedding,
     1 - (embedding <=> query_embedding) AS semantic_score,
     ts_rank(to_tsvector('english', text), query) AS fulltext_score
-  FROM arcana_chunks
+  FROM sorana_chunks
 ),
 normalized AS (
   SELECT *,
@@ -172,13 +172,13 @@ Single-query evaluates **all** chunks, ensuring nothing is missed.
 
 ```elixir
 # Equal weight (default)
-{:ok, results} = Arcana.search("query", repo: Repo, mode: :hybrid)
+{:ok, results} = Sorana.search("query", repo: Repo, mode: :hybrid)
 
 # Favor semantic similarity
-{:ok, results} = Arcana.search("query", repo: Repo, mode: :hybrid, semantic_weight: 0.7, fulltext_weight: 0.3)
+{:ok, results} = Sorana.search("query", repo: Repo, mode: :hybrid, semantic_weight: 0.7, fulltext_weight: 0.3)
 
 # Favor keyword matches
-{:ok, results} = Arcana.search("query", repo: Repo, mode: :hybrid, semantic_weight: 0.3, fulltext_weight: 0.7)
+{:ok, results} = Sorana.search("query", repo: Repo, mode: :hybrid, semantic_weight: 0.3, fulltext_weight: 0.7)
 ```
 
 Results include individual scores for debugging:

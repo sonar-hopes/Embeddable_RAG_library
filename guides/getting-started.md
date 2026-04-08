@@ -1,13 +1,13 @@
-# Getting Started with Arcana 🔮📚
+# Getting Started with Sorana 🔮📚
 
-Arcana is a RAG (Retrieval Augmented Generation) library for Elixir that lets you build AI-powered search and question-answering into your Phoenix applications.
+Sorana is a RAG (Retrieval Augmented Generation) library for Elixir that lets you build AI-powered search and question-answering into your Phoenix applications.
 
 ## Installation
 
 **With Igniter (recommended):**
 
 ```bash
-mix igniter.install arcana
+mix igniter.install sorana
 mix ecto.migrate
 ```
 
@@ -18,44 +18,44 @@ This adds the dependency, creates migrations, configures your repo, and sets up 
 ```elixir
 def deps do
   [
-    {:arcana, "~> 1.0"}
+    {:sorana, "~> 1.0"}
   ]
 end
 ```
 
 ```bash
 mix deps.get
-mix arcana.install
+mix sorana.install
 mix ecto.migrate
 ```
 
 ## Embedding Configuration
 
-Arcana uses local embeddings by default via Bumblebee. No API keys needed.
+Sorana uses local embeddings by default via Bumblebee. No API keys needed.
 
 ```elixir
 # config/config.exs
 
 # Default - BGE Small (384 dimensions, 133MB)
-config :arcana, embedder: :local
+config :sorana, embedder: :local
 
 # Use a different model
-config :arcana, embedder: {:local, model: "BAAI/bge-base-en-v1.5"}
+config :sorana, embedder: {:local, model: "BAAI/bge-base-en-v1.5"}
 ```
 
-Add Arcana components to your supervision tree:
+Add Sorana components to your supervision tree:
 
 ```elixir
 # application.ex
 children = [
   MyApp.Repo,
-  Arcana.TaskSupervisor,  # Required for dashboard async operations
-  Arcana.Embedder.Local   # Only if using local embeddings
+  Sorana.TaskSupervisor,  # Required for dashboard async operations
+  Sorana.Embedder.Local   # Only if using local embeddings
 ]
 ```
 
-`Arcana.TaskSupervisor` is required for the dashboard's async operations (Ask, Maintenance).
-`Arcana.Embedder.Local` starts the local embedding model (only needed if using local embeddings).
+`Sorana.TaskSupervisor` is required for the dashboard's async operations (Ask, Maintenance).
+`Sorana.Embedder.Local` starts the local embedding model (only needed if using local embeddings).
 
 ### Available Models
 
@@ -70,7 +70,7 @@ children = [
 | `thenlper/gte-small` | 384 | 67MB | Smallest, fastest |
 | `sentence-transformers/all-MiniLM-L6-v2` | 384 | 91MB | Lightweight |
 
-**E5 Models:** E5 models require special prefixes (`query:` for search queries, `passage:` for documents). Arcana handles this automatically - just configure the model and the prefixes are added during search and ingestion.
+**E5 Models:** E5 models require special prefixes (`query:` for search queries, `passage:` for documents). Sorana handles this automatically - just configure the model and the prefixes are added during search and ingestion.
 
 ### Changing Embedding Models
 
@@ -79,29 +79,29 @@ When switching to a model with different dimensions, you need to resize the vect
 ```bash
 # 1. Update your config to use the new model
 # 2. Generate a migration to resize the vector column
-mix arcana.gen.embedding_migration
+mix sorana.gen.embedding_migration
 
 # 3. Run the migration
 mix ecto.migrate
 
 # 4. Re-embed all documents with the new model
-mix arcana.reembed
+mix sorana.reembed
 ```
 
 For OpenAI embeddings or custom providers, see the [LLM Integration](llm-integration.md) guide.
 
 ## Chunking Configuration
 
-Arcana uses the default text chunker which splits documents into overlapping chunks:
+Sorana uses the default text chunker which splits documents into overlapping chunks:
 
 ```elixir
 # config/config.exs
 
 # Default - 450 tokens with 50 token overlap
-config :arcana, chunker: :default
+config :sorana, chunker: :default
 
 # Custom chunk sizes
-config :arcana, chunker: {:default, chunk_size: 512, chunk_overlap: 100}
+config :sorana, chunker: {:default, chunk_size: 512, chunk_overlap: 100}
 ```
 
 ### Available Options
@@ -115,11 +115,11 @@ config :arcana, chunker: {:default, chunk_size: 512, chunk_overlap: 100}
 
 ### Custom Chunkers
 
-For semantic chunking or domain-specific splitting, implement the `Arcana.Chunker` behaviour:
+For semantic chunking or domain-specific splitting, implement the `Sorana.Chunker` behaviour:
 
 ```elixir
 defmodule MyApp.SemanticChunker do
-  @behaviour Arcana.Chunker
+  @behaviour Sorana.Chunker
 
   @impl true
   def chunk(text, opts) do
@@ -134,15 +134,15 @@ defmodule MyApp.SemanticChunker do
 end
 
 # Configure globally
-config :arcana, chunker: MyApp.SemanticChunker
+config :sorana, chunker: MyApp.SemanticChunker
 
 # Or per-ingest
-Arcana.ingest(text, repo: MyApp.Repo, chunker: MyApp.SemanticChunker)
+Sorana.ingest(text, repo: MyApp.Repo, chunker: MyApp.SemanticChunker)
 ```
 
 ## PDF Parsing Configuration
 
-Arcana supports PDF file ingestion with pluggable parsers. The default uses Poppler's `pdftotext` command-line tool.
+Sorana supports PDF file ingestion with pluggable parsers. The default uses Poppler's `pdftotext` command-line tool.
 
 ### Default Parser (Poppler)
 
@@ -150,10 +150,10 @@ Arcana supports PDF file ingestion with pluggable parsers. The default uses Popp
 # config/config.exs
 
 # Default: Poppler's pdftotext
-config :arcana, pdf_parser: :poppler
+config :sorana, pdf_parser: :poppler
 
 # With options
-config :arcana, pdf_parser: {:poppler, layout: true}
+config :sorana, pdf_parser: {:poppler, layout: true}
 ```
 
 **Installing Poppler:**
@@ -167,7 +167,7 @@ config :arcana, pdf_parser: {:poppler, layout: true}
 Check availability:
 
 ```elixir
-iex> Arcana.FileParser.PDF.Poppler.available?()
+iex> Sorana.FileParser.PDF.Poppler.available?()
 true
 ```
 
@@ -179,11 +179,11 @@ true
 
 ### Custom PDF Parsers
 
-For alternative PDF parsing (e.g., Apache PDFBox, pdf2htmlex, cloud APIs), implement the `Arcana.FileParser.PDF` behaviour:
+For alternative PDF parsing (e.g., Apache PDFBox, pdf2htmlex, cloud APIs), implement the `Sorana.FileParser.PDF` behaviour:
 
 ```elixir
 defmodule MyApp.PDFBoxParser do
-  @behaviour Arcana.FileParser.PDF
+  @behaviour Sorana.FileParser.PDF
 
   @impl true
   def parse(path, opts) when is_binary(path) do
@@ -209,8 +209,8 @@ Configure your custom parser:
 
 ```elixir
 # config/config.exs
-config :arcana, pdf_parser: MyApp.PDFBoxParser
-config :arcana, pdf_parser: {MyApp.PDFBoxParser, some_option: "value"}
+config :sorana, pdf_parser: MyApp.PDFBoxParser
+config :sorana, pdf_parser: {MyApp.PDFBoxParser, some_option: "value"}
 ```
 
 ### Binary Content Support
@@ -219,7 +219,7 @@ Some parsers can accept binary PDF content directly (useful for processing uploa
 
 ```elixir
 defmodule MyApp.InMemoryPDFParser do
-  @behaviour Arcana.FileParser.PDF
+  @behaviour Sorana.FileParser.PDF
 
   @impl true
   def parse(binary, opts) when is_binary(binary) do
@@ -234,10 +234,10 @@ end
 Check if a parser supports binary input:
 
 ```elixir
-iex> Arcana.FileParser.PDF.supports_binary?({MyApp.InMemoryPDFParser, []})
+iex> Sorana.FileParser.PDF.supports_binary?({MyApp.InMemoryPDFParser, []})
 true
 
-iex> Arcana.FileParser.PDF.supports_binary?({Arcana.FileParser.PDF.Poppler, []})
+iex> Sorana.FileParser.PDF.supports_binary?({Sorana.FileParser.PDF.Poppler, []})
 false
 ```
 
@@ -247,34 +247,34 @@ false
 
 ```elixir
 # Ingest text content
-{:ok, document} = Arcana.ingest("Your content here", repo: MyApp.Repo)
+{:ok, document} = Sorana.ingest("Your content here", repo: MyApp.Repo)
 
 # With metadata
-{:ok, document} = Arcana.ingest(
+{:ok, document} = Sorana.ingest(
   "Article about Elixir",
   repo: MyApp.Repo,
   metadata: %{"author" => "Jane", "category" => "programming"}
 )
 
 # With a source ID for grouping
-{:ok, document} = Arcana.ingest(
+{:ok, document} = Sorana.ingest(
   "Chapter 1 content",
   repo: MyApp.Repo,
   source_id: "book-123"
 )
 
 # Ingest from file (supports .txt, .md, .pdf)
-{:ok, document} = Arcana.ingest_file("path/to/document.pdf", repo: MyApp.Repo)
+{:ok, document} = Sorana.ingest_file("path/to/document.pdf", repo: MyApp.Repo)
 
 # Organize documents into collections
-{:ok, document} = Arcana.ingest(
+{:ok, document} = Sorana.ingest(
   "Product documentation",
   repo: MyApp.Repo,
   collection: "products"
 )
 
 # With collection description (helps Pipeline.select/2 route to the right collection)
-{:ok, document} = Arcana.ingest(
+{:ok, document} = Sorana.ingest(
   "API reference",
   repo: MyApp.Repo,
   collection: %{name: "api", description: "REST API endpoints and parameters"}
@@ -288,16 +288,16 @@ false
 
 ```elixir
 # Semantic search (default)
-{:ok, results} = Arcana.search("functional programming", repo: MyApp.Repo)
+{:ok, results} = Sorana.search("functional programming", repo: MyApp.Repo)
 
 # Full-text search
-{:ok, results} = Arcana.search("Elixir", repo: MyApp.Repo, mode: :fulltext)
+{:ok, results} = Sorana.search("Elixir", repo: MyApp.Repo, mode: :fulltext)
 
 # Hybrid search (combines semantic + fulltext)
-{:ok, results} = Arcana.search("Elixir patterns", repo: MyApp.Repo, mode: :hybrid)
+{:ok, results} = Sorana.search("Elixir patterns", repo: MyApp.Repo, mode: :hybrid)
 
 # Hybrid with custom weights (pgvector backend)
-{:ok, results} = Arcana.search("Elixir patterns",
+{:ok, results} = Sorana.search("Elixir patterns",
   repo: MyApp.Repo,
   mode: :hybrid,
   semantic_weight: 0.7,  # Weight for semantic similarity
@@ -305,7 +305,7 @@ false
 )
 
 # With filters
-{:ok, results} = Arcana.search("query",
+{:ok, results} = Sorana.search("query",
   repo: MyApp.Repo,
   limit: 5,
   threshold: 0.7,
@@ -316,7 +316,7 @@ false
 
 ### Question Answering
 
-Use `Arcana.ask/2` to combine search with an LLM for answers:
+Use `Sorana.ask/2` to combine search with an LLM for answers:
 
 ```elixir
 llm_fn = fn prompt, context ->
@@ -324,7 +324,7 @@ llm_fn = fn prompt, context ->
   {:ok, "Generated answer based on context"}
 end
 
-{:ok, answer} = Arcana.ask("What is Elixir?",
+{:ok, answer} = Sorana.ask("What is Elixir?",
   repo: MyApp.Repo,
   llm: llm_fn,
   limit: 5
@@ -335,10 +335,10 @@ See the [LLM Integration](llm-integration.md) guide for production-ready LLM int
 
 ## Pipeline (Modular RAG)
 
-For more control over the RAG process, use `Arcana.Pipeline`. See the [Pipeline guide](pipeline.md) for the full reference; this section just shows the shape.
+For more control over the RAG process, use `Sorana.Pipeline`. See the [Pipeline guide](pipeline.md) for the full reference; this section just shows the shape.
 
 ```elixir
-alias Arcana.Pipeline
+alias Sorana.Pipeline
 
 llm = fn prompt -> {:ok, "LLM response"} end
 
@@ -430,7 +430,7 @@ For custom re-ranking logic (e.g., cross-encoder models):
 ```elixir
 # Custom reranker module
 defmodule MyApp.CrossEncoderReranker do
-  @behaviour Arcana.Reranker
+  @behaviour Sorana.Reranker
 
   @impl true
   def rerank(question, chunks, _opts) do
@@ -447,7 +447,7 @@ ctx |> Pipeline.rerank(reranker: MyApp.CrossEncoderReranker)
 Improve search results by rewriting queries before searching:
 
 ```elixir
-alias Arcana.Rewriters
+alias Sorana.Rewriters
 
 # Create a rewriter with your LLM
 rewriter = Rewriters.expand(llm: fn prompt ->
@@ -456,7 +456,7 @@ rewriter = Rewriters.expand(llm: fn prompt ->
 end)
 
 # Use it with search
-results = Arcana.search("ML",
+results = Sorana.search("ML",
   repo: MyApp.Repo,
   rewriter: rewriter
 )
@@ -464,30 +464,30 @@ results = Arcana.search("ML",
 
 ## Dashboard UI
 
-Arcana includes a LiveView dashboard for managing documents:
+Sorana includes a LiveView dashboard for managing documents:
 
 ```elixir
 # In your router
-import ArcanaWeb.Router
+import SoranaWeb.Router
 
 scope "/admin", MyAppWeb do
   pipe_through [:browser, :admin]
-  arcana_dashboard("/arcana", repo: MyApp.Repo)
+  sorana_dashboard("/sorana", repo: MyApp.Repo)
 end
 ```
 
 ## Telemetry
 
-Arcana emits telemetry events for all operations. You can attach handlers to observe performance and usage:
+Sorana emits telemetry events for all operations. You can attach handlers to observe performance and usage:
 
 ```elixir
 # In your application startup
 :telemetry.attach_many(
-  "my-arcana-handler",
+  "my-sorana-handler",
   [
-    [:arcana, :ingest, :stop],
-    [:arcana, :search, :stop],
-    [:arcana, :ask, :stop]
+    [:sorana, :ingest, :stop],
+    [:sorana, :search, :stop],
+    [:sorana, :ask, :stop]
   ],
   fn event, measurements, metadata, _config ->
     duration_ms = System.convert_time_unit(measurements.duration, :native, :millisecond)
@@ -497,11 +497,11 @@ Arcana emits telemetry events for all operations. You can attach handlers to obs
 )
 ```
 
-Events follow the `:telemetry.span/3` convention with `:start`, `:stop`, and `:exception` suffixes. See `Arcana.Telemetry` for complete documentation.
+Events follow the `:telemetry.span/3` convention with `:start`, `:stop`, and `:exception` suffixes. See `Sorana.Telemetry` for complete documentation.
 
 ## Next Steps
 
-- [LLM Integration](llm-integration.md) - Connect Arcana to LLMs
+- [LLM Integration](llm-integration.md) - Connect Sorana to LLMs
 - [Pipeline (Modular RAG)](pipeline.md) - Compose retrieval steps yourself
 - [Loop (Agentic RAG)](loop.md) - Let an LLM drive tool calls until it can answer
 - [Re-ranking](reranking.md) - Improve retrieval quality

@@ -1,28 +1,28 @@
 # Pipeline (Modular RAG)
 
-`Arcana.Pipeline` is Arcana's Modular RAG surface: a composable pipeline of pluggable steps that you wire together at code time. Each step is a behaviour with a sensible default implementation, and a `%Pipeline.Context{}` struct flows through them carrying the question, intermediate state, and final answer.
+`Sorana.Pipeline` is Sorana's Modular RAG surface: a composable pipeline of pluggable steps that you wire together at code time. Each step is a behaviour with a sensible default implementation, and a `%Pipeline.Context{}` struct flows through them carrying the question, intermediate state, and final answer.
 
-This guide covers when to reach for `Arcana.Pipeline` over `Arcana.search/2` or `Arcana.Loop`, every step in the pipeline, how to swap in custom behaviours, and the telemetry events each step emits.
+This guide covers when to reach for `Sorana.Pipeline` over `Sorana.search/2` or `Sorana.Loop`, every step in the pipeline, how to swap in custom behaviours, and the telemetry events each step emits.
 
 ## When to use Pipeline
 
-Use `Arcana.Pipeline` when you want **explicit control over the order and behavior of RAG steps** but you (the developer) still know the right sequence ahead of time. Typical reasons:
+Use `Sorana.Pipeline` when you want **explicit control over the order and behavior of RAG steps** but you (the developer) still know the right sequence ahead of time. Typical reasons:
 
 - You need a non-default order (rewrite before decompose, decompose without expand, etc.)
 - You want to inspect intermediate state (`ctx.sub_questions`, `ctx.expanded_query`, `ctx.reason_iterations`) for debugging or logging
 - You're plugging in custom behaviours (your own searcher, your own reranker)
-- You want grounding (`ground/2`) which isn't run by `Arcana.ask/2`
+- You want grounding (`ground/2`) which isn't run by `Sorana.ask/2`
 
-If you're happy with `Arcana.search` and `Arcana.ask`'s defaults, use those — they're a thin convenience wrapper over the same primitives.
+If you're happy with `Sorana.search` and `Sorana.ask`'s defaults, use those — they're a thin convenience wrapper over the same primitives.
 
-If the right sequence of searches **isn't** knowable upfront (the LLM should decide), use `Arcana.Loop` instead. See [Loop (Agentic RAG)](loop.md).
+If the right sequence of searches **isn't** knowable upfront (the LLM should decide), use `Sorana.Loop` instead. See [Loop (Agentic RAG)](loop.md).
 
 ## Overview
 
 A `%Pipeline.Context{}` struct flows through each step:
 
 ```elixir
-alias Arcana.Pipeline
+alias Sorana.Pipeline
 
 ctx =
   Pipeline.new("Compare Elixir and Erlang")
@@ -45,7 +45,7 @@ Configure defaults in your config so you don't have to pass them every time:
 
 ```elixir
 # config/config.exs
-config :arcana,
+config :sorana,
   repo: MyApp.Repo,
   llm: &MyApp.LLM.complete/1
 ```
@@ -253,7 +253,7 @@ ctx = Pipeline.answer(ctx)
 ctx.answer
 # => "Elixir is a functional programming language..."
 ctx.context_used
-# => [%Arcana.Chunk{...}, ...]
+# => [%Sorana.Chunk{...}, ...]
 ```
 
 When `skip_retrieval` is true (set by `gate/2`), `answer/2` uses a no-context prompt and answers from the LLM's knowledge:
@@ -399,18 +399,18 @@ Steps skip execution when an error is present.
 
 ## Telemetry
 
-Each step emits a `:telemetry.span` under `[:arcana, :pipeline, ...]`. The events were previously emitted under `[:arcana, :agent, ...]`; that prefix was renamed to `:pipeline` along with the module rename and is **no longer emitted**. Update any existing handlers.
+Each step emits a `:telemetry.span` under `[:sorana, :pipeline, ...]`. The events were previously emitted under `[:sorana, :agent, ...]`; that prefix was renamed to `:pipeline` along with the module rename and is **no longer emitted**. Update any existing handlers.
 
 ```elixir
-[:arcana, :pipeline, :rewrite, :start | :stop | :exception]
-[:arcana, :pipeline, :select, :start | :stop | :exception]
-[:arcana, :pipeline, :expand, :start | :stop | :exception]
-[:arcana, :pipeline, :decompose, :start | :stop | :exception]
-[:arcana, :pipeline, :search, :start | :stop | :exception]
-[:arcana, :pipeline, :rerank, :start | :stop | :exception]
-[:arcana, :pipeline, :answer, :start | :stop | :exception]
-[:arcana, :pipeline, :ground, :start | :stop | :exception]
-[:arcana, :pipeline, :self_correct, :start | :stop | :exception]  # per correction attempt
+[:sorana, :pipeline, :rewrite, :start | :stop | :exception]
+[:sorana, :pipeline, :select, :start | :stop | :exception]
+[:sorana, :pipeline, :expand, :start | :stop | :exception]
+[:sorana, :pipeline, :decompose, :start | :stop | :exception]
+[:sorana, :pipeline, :search, :start | :stop | :exception]
+[:sorana, :pipeline, :rerank, :start | :stop | :exception]
+[:sorana, :pipeline, :answer, :start | :stop | :exception]
+[:sorana, :pipeline, :ground, :start | :stop | :exception]
+[:sorana, :pipeline, :self_correct, :start | :stop | :exception]  # per correction attempt
 ```
 
 Example handler:
@@ -418,7 +418,7 @@ Example handler:
 ```elixir
 :telemetry.attach(
   "pipeline-logger",
-  [:arcana, :pipeline, :search, :stop],
+  [:sorana, :pipeline, :search, :stop],
   fn _event, measurements, metadata, _config ->
     IO.puts("Search found #{metadata.total_chunks} chunks in #{measurements.duration}ns")
   end,
@@ -487,14 +487,14 @@ Every pipeline step has a behaviour and can be replaced with a custom implementa
 
 | Step | Behaviour | Default Implementation | Option |
 |------|-----------|----------------------|--------|
-| `rewrite/2` | `Arcana.Pipeline.Rewriter` | `Rewriter.LLM` | `:rewriter` |
-| `select/2` | `Arcana.Pipeline.Selector` | `Selector.LLM` | `:selector` |
-| `expand/2` | `Arcana.Pipeline.Expander` | `Expander.LLM` | `:expander` |
-| `decompose/2` | `Arcana.Pipeline.Decomposer` | `Decomposer.LLM` | `:decomposer` |
-| `search/2` | `Arcana.Searcher` | `Searcher.Arcana` | `:searcher` |
-| `rerank/2` | `Arcana.Reranker` | `Reranker.LLM` | `:reranker` |
-| `answer/2` | `Arcana.Pipeline.Answerer` | `Answerer.LLM` | `:answerer` |
-| `ground/2` | `Arcana.Grounder` | `Grounder.Hallmark` | `:grounder` |
+| `rewrite/2` | `Sorana.Pipeline.Rewriter` | `Rewriter.LLM` | `:rewriter` |
+| `select/2` | `Sorana.Pipeline.Selector` | `Selector.LLM` | `:selector` |
+| `expand/2` | `Sorana.Pipeline.Expander` | `Expander.LLM` | `:expander` |
+| `decompose/2` | `Sorana.Pipeline.Decomposer` | `Decomposer.LLM` | `:decomposer` |
+| `search/2` | `Sorana.Searcher` | `Searcher.Sorana` | `:searcher` |
+| `rerank/2` | `Sorana.Reranker` | `Reranker.LLM` | `:reranker` |
+| `answer/2` | `Sorana.Pipeline.Answerer` | `Answerer.LLM` | `:answerer` |
+| `ground/2` | `Sorana.Grounder` | `Grounder.Hallmark` | `:grounder` |
 
 ### Custom Rewriter
 
@@ -502,7 +502,7 @@ Transform queries using your own logic:
 
 ```elixir
 defmodule MyApp.SpellCheckRewriter do
-  @behaviour Arcana.Pipeline.Rewriter
+  @behaviour Sorana.Pipeline.Rewriter
 
   @impl true
   def rewrite(question, _opts) do
@@ -521,7 +521,7 @@ Expand queries with domain-specific knowledge:
 
 ```elixir
 defmodule MyApp.MedicalExpander do
-  @behaviour Arcana.Pipeline.Expander
+  @behaviour Sorana.Pipeline.Expander
 
   @impl true
   def expand(question, _opts) do
@@ -539,7 +539,7 @@ Break questions into sub-questions with custom logic:
 
 ```elixir
 defmodule MyApp.SimpleDecomposer do
-  @behaviour Arcana.Pipeline.Decomposer
+  @behaviour Sorana.Pipeline.Decomposer
 
   @impl true
   def decompose(question, _opts) do
@@ -561,7 +561,7 @@ Replace the default pgvector search with any backend:
 
 ```elixir
 defmodule MyApp.ElasticsearchSearcher do
-  @behaviour Arcana.Searcher
+  @behaviour Sorana.Searcher
 
   @impl true
   def search(question, collection, opts) do
@@ -600,7 +600,7 @@ Use a cross-encoder or other scoring model:
 
 ```elixir
 defmodule MyApp.CrossEncoderReranker do
-  @behaviour Arcana.Reranker
+  @behaviour Sorana.Reranker
 
   @impl true
   def rerank(question, chunks, opts) do
@@ -628,7 +628,7 @@ Generate answers with your own approach:
 
 ```elixir
 defmodule MyApp.TemplateAnswerer do
-  @behaviour Arcana.Pipeline.Answerer
+  @behaviour Sorana.Pipeline.Answerer
 
   @impl true
   def answer(question, chunks, _opts) do
@@ -657,13 +657,13 @@ Replace the default Hallmark grounder with your own hallucination detection logi
 
 ```elixir
 defmodule MyApp.APIGrounder do
-  @behaviour Arcana.Grounder
+  @behaviour Sorana.Grounder
 
   @impl true
   def ground(answer, chunks, opts) do
     score = MyApp.FactChecker.check(answer, chunks)
 
-    {:ok, %Arcana.Grounding.Result{
+    {:ok, %Sorana.Grounding.Result{
       score: score,
       hallucinated_spans: [],
       token_labels: []
@@ -702,7 +702,7 @@ end)
 
 # Inline grounder
 Pipeline.ground(ctx, grounder: fn answer, chunks, _opts ->
-  {:ok, %Arcana.Grounding.Result{score: 1.0, hallucinated_spans: [], token_labels: []}}
+  {:ok, %Sorana.Grounding.Result{score: 1.0, hallucinated_spans: [], token_labels: []}}
 end)
 ```
 
@@ -738,7 +738,7 @@ ctx =
 
 ## Context Struct
 
-The `Arcana.Pipeline.Context` struct carries all state:
+The `Sorana.Pipeline.Context` struct carries all state:
 
 | Field | Description |
 |-------|-------------|
@@ -755,5 +755,5 @@ The `Arcana.Pipeline.Context` struct carries all state:
 | `context_used` | Chunks used for answer |
 | `correction_count` | Number of self-corrections made |
 | `corrections` | List of `{answer, feedback}` tuples |
-| `grounding` | Grounding result (`%Arcana.Grounding.Result{}` or nil) |
+| `grounding` | Grounding result (`%Sorana.Grounding.Result{}` or nil) |
 | `error` | Error if any step failed |

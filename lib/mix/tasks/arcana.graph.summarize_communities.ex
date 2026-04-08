@@ -1,4 +1,4 @@
-defmodule Mix.Tasks.Arcana.Graph.SummarizeCommunities do
+defmodule Mix.Tasks.Sorana.Graph.SummarizeCommunities do
   @moduledoc """
   Generates LLM summaries for knowledge graph communities.
 
@@ -93,7 +93,7 @@ defmodule Mix.Tasks.Arcana.Graph.SummarizeCommunities do
     end
 
     # Show current config
-    info = Arcana.Maintenance.graph_info()
+    info = Sorana.Maintenance.graph_info()
     Mix.shell().info("Graph config: #{format_info(info)}")
     Mix.shell().info("Summarization: force=#{force}, concurrency=#{concurrency}")
 
@@ -120,7 +120,7 @@ defmodule Mix.Tasks.Arcana.Graph.SummarizeCommunities do
         else: summarize_opts
 
     {:ok, %{communities: communities, summaries: summaries}} =
-      Arcana.Maintenance.summarize_communities(repo, summarize_opts)
+      Sorana.Maintenance.summarize_communities(repo, summarize_opts)
 
     Mix.shell().info(
       "\nDone! Processed #{communities} communities, generated #{summaries} summaries."

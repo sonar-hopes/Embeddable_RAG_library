@@ -1,4 +1,4 @@
-defmodule Mix.Tasks.Arcana.Graph.Rebuild do
+defmodule Mix.Tasks.Sorana.Graph.Rebuild do
   @moduledoc """
   Rebuilds the knowledge graph for all documents.
 
@@ -59,7 +59,7 @@ defmodule Mix.Tasks.Arcana.Graph.Rebuild do
     end
 
     # Show current graph info
-    info = Arcana.Maintenance.graph_info()
+    info = Sorana.Maintenance.graph_info()
     Mix.shell().info("Graph config: #{format_info(info)}")
 
     unless info.enabled do
@@ -94,7 +94,7 @@ defmodule Mix.Tasks.Arcana.Graph.Rebuild do
        relationships: relationships,
        skipped: skipped
      }} =
-      Arcana.Maintenance.rebuild_graph(repo, rebuild_opts)
+      Sorana.Maintenance.rebuild_graph(repo, rebuild_opts)
 
     skip_msg = if skipped > 0, do: " (skipped #{skipped} already processed)", else: ""
 

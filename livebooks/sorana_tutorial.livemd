@@ -1,0 +1,927 @@
+# Sorana 🔮📚 Tutorial
+
+```elixir
+Mix.install([
+  {:arcana, path: Path.expand("../"), force: true},
+  {:kino, "~> 0.14"},
+  {:kino_vega_lite, "~> 0.1"}
+])
+
+alias VegaLite, as: Vl
+```
+
+## Intro
+
+A hands-on guide to building RAG (Retrieval Augmented Generation) applications with Sorana. We'll use the in-memory vector store, so no database setup is required.
+
+**What you'll learn:**
+
+1. Ingesting documents into a vector store
+2. Semantic, fulltext, and hybrid search
+3. Organizing documents into collections
+4. Building agentic RAG pipelines
+
+## 1. Getting Started: In-Memory Vector Store
+
+Sorana supports two storage backends: **pgvector** (PostgreSQL) and **memory** (HNSWLib). The memory backend is perfect for learning and experimentation.
+
+### Start the Memory Vector Store
+
+```elixir
+# Start the in-memory vector store
+{:ok, memory_pid} = Sorana.VectorStore.Memory.start_link(name: nil)
+
+# We'll pass this pid to all operations
+IO.puts("Memory vector store started: #{inspect(memory_pid)}")
+```
+
+### Start Local Embeddings
+
+Sorana uses Bumblebee to generate embeddings locally with `bge-small-en-v1.5`. This creates 384-dimensional vectors.
+
+```elixir
+# Start the local embedding model
+# This downloads the model on first run (~100MB)
+{:ok, _} = Sorana.Embedder.Local.start_link([])
+
+# Verify it's working
+{:ok, embedding} = Sorana.Embedder.embed(Sorana.embedder(), "Hello, world!")
+IO.puts("Embedding dimensions: #{length(embedding)}")
+```
+
+## 2. Storing and Searching Vectors
+
+Let's store some sample documents about programming languages.
+
+### Store Documents
+
+```elixir
+alias Sorana.VectorStore
+
+# Sample documents about programming languages
+docs = [
+  %{
+    id: "elixir-intro",
+    text: "Elixir is a dynamic, functional language for building scalable applications. It runs on the Erlang VM (BEAM) and is known for fault-tolerance and concurrency."
+  },
+  %{
+    id: "elixir-syntax",
+    text: "Elixir uses pattern matching extensively. Functions can have multiple clauses that match different patterns. The pipe operator |> chains function calls elegantly."
+  },
+  %{
+    id: "erlang-intro",
+    text: "Erlang was designed for telecom systems requiring high availability. It pioneered the actor model with lightweight processes and message passing."
+  },
+  %{
+    id: "erlang-otp",
+    text: "OTP (Open Telecom Platform) provides behaviors like GenServer, Supervisor, and Application. These building blocks enable fault-tolerant system design."
+  },
+  %{
+    id: "python-intro",
+    text: "Python is a high-level, interpreted language emphasizing readability. It's popular for data science, web development, and scripting."
+  },
+  %{
+    id: "rust-intro",
+    text: "Rust provides memory safety without garbage collection through its ownership system. It's used for systems programming where performance is critical."
+  }
+]
+
+# Store each document
+for doc <- docs do
+  {:ok, embedding} = Sorana.Embedder.embed(Sorana.embedder(), doc.text)
+
+  :ok = VectorStore.store(
+    "languages",           # collection name
+    doc.id,                # unique id
+    embedding,             # vector embedding
+    %{text: doc.text},     # metadata
+    vector_store: {:memory, pid: memory_pid}
+  )
+end
+
+IO.puts("Stored #{length(docs)} documents in 'languages' collection")
+```
+
+### Semantic Search
+
+Semantic search finds documents with similar **meaning**, not just matching keywords.
+
+```elixir
+# Search for documents about concurrent programming
+query = "concurrent programming with message passing"
+
+{:ok, query_embedding} = Sorana.Embedder.embed(Sorana.embedder(), query)
+
+results = VectorStore.search(
+  "languages",
+  query_embedding,
+  vector_store: {:memory, pid: memory_pid},
+  limit: 3
+)
+
+IO.puts("Query: #{query}\n")
+IO.puts("Results:")
+for result <- results do
+  IO.puts("  [#{Float.round(result.score, 3)}] #{result.id}")
+  IO.puts("    #{String.slice(result.metadata.text, 0, 80)}...")
+end
+```
+
+Notice how it finds Elixir and Erlang documents even though we searched for "concurrent" and "message passing" - the model understands these concepts are related.
+
+### Fulltext Search
+
+Fulltext search matches exact keywords using TF-IDF-like scoring.
+
+```elixir
+# Search for exact term "pattern matching"
+results = VectorStore.search_text(
+  "languages",
+  "pattern matching",
+  vector_store: {:memory, pid: memory_pid},
+  limit: 3
+)
+
+IO.puts("Fulltext search: 'pattern matching'\n")
+IO.puts("Results:")
+for result <- results do
+  IO.puts("  [#{Float.round(result.score, 3)}] #{result.id}")
+  IO.puts("    #{String.slice(result.metadata.text, 0, 80)}...")
+end
+```
+
+This only returns documents containing the exact terms "pattern" and "matching".
+
+## 3. Search Mode Comparison
+
+Let's visualize how different search modes perform on the same query.
+
+```elixir
+# Compare search modes
+test_queries = [
+  "functional programming language",
+  "memory safety",
+  "fault tolerant systems",
+  "BEAM virtual machine"
+]
+
+comparison_data =
+  for query <- test_queries do
+    {:ok, query_embedding} = Sorana.Embedder.embed(Sorana.embedder(), query)
+
+    # Semantic search
+    semantic = VectorStore.search("languages", query_embedding,
+      vector_store: {:memory, pid: memory_pid}, limit: 1)
+
+    # Fulltext search
+    fulltext = VectorStore.search_text("languages", query,
+      vector_store: {:memory, pid: memory_pid}, limit: 1)
+
+    %{
+      query: query,
+      semantic_match: if(semantic != [], do: hd(semantic).id, else: "none"),
+      semantic_score: if(semantic != [], do: hd(semantic).score, else: 0),
+      fulltext_match: if(fulltext != [], do: hd(fulltext).id, else: "none"),
+      fulltext_score: if(fulltext != [], do: hd(fulltext).score, else: 0)
+    }
+  end
+
+Kino.DataTable.new(comparison_data)
+```
+
+**Key insight:** Semantic search understands meaning ("BEAM virtual machine" matches Elixir), while fulltext requires exact terms.
+
+## 4. Working with Collections
+
+Collections let you organize documents into logical groups, like folders.
+
+```elixir
+# Add some web framework documents to a new collection
+frameworks = [
+  %{id: "phoenix", text: "Phoenix is a web framework for Elixir. It uses channels for real-time features and LiveView for server-rendered interactive UIs."},
+  %{id: "rails", text: "Ruby on Rails pioneered convention over configuration. It includes ActiveRecord ORM and follows the MVC pattern."},
+  %{id: "django", text: "Django is a Python web framework with batteries included. It has an admin interface, ORM, and authentication built-in."}
+]
+
+for doc <- frameworks do
+  {:ok, embedding} = Sorana.Embedder.embed(Sorana.embedder(), doc.text)
+  :ok = VectorStore.store("frameworks", doc.id, embedding, %{text: doc.text},
+    vector_store: {:memory, pid: memory_pid})
+end
+
+IO.puts("Stored #{length(frameworks)} documents in 'frameworks' collection")
+```
+
+```elixir
+# Search only in frameworks collection
+query = "real-time web applications"
+{:ok, query_embedding} = Sorana.Embedder.embed(Sorana.embedder(), query)
+
+framework_results = VectorStore.search("frameworks", query_embedding,
+  vector_store: {:memory, pid: memory_pid}, limit: 2)
+
+language_results = VectorStore.search("languages", query_embedding,
+  vector_store: {:memory, pid: memory_pid}, limit: 2)
+
+IO.puts("Query: #{query}\n")
+IO.puts("From 'frameworks':")
+for r <- framework_results, do: IO.puts("  #{r.id}: #{Float.round(r.score, 3)}")
+
+IO.puts("\nFrom 'languages':")
+for r <- language_results, do: IO.puts("  #{r.id}: #{Float.round(r.score, 3)}")
+```
+
+## 5. Visualizing Similarity Scores
+
+Let's create a heatmap showing how similar each document is to various queries.
+
+```elixir
+queries = ["concurrency", "web framework", "memory management", "functional"]
+doc_ids = ["elixir-intro", "erlang-intro", "python-intro", "rust-intro", "phoenix"]
+
+# Get all documents
+all_docs = docs ++ [%{id: "phoenix", text: hd(frameworks).text}]
+
+# Calculate similarity matrix
+heatmap_data =
+  for query <- queries,
+      doc <- all_docs,
+      doc.id in doc_ids do
+    {:ok, q_emb} = Sorana.Embedder.embed(Sorana.embedder(), query)
+    {:ok, d_emb} = Sorana.Embedder.embed(Sorana.embedder(), doc.text)
+
+    # Cosine similarity
+    dot = Enum.zip_with(q_emb, d_emb, &(&1 * &2)) |> Enum.sum()
+    norm_q = :math.sqrt(Enum.map(q_emb, &(&1 * &1)) |> Enum.sum())
+    norm_d = :math.sqrt(Enum.map(d_emb, &(&1 * &1)) |> Enum.sum())
+    similarity = dot / (norm_q * norm_d)
+
+    %{query: query, document: doc.id, similarity: Float.round(similarity, 3)}
+  end
+
+Vl.new(width: 400, height: 200, title: "Query-Document Similarity")
+|> Vl.data_from_values(heatmap_data)
+|> Vl.mark(:rect)
+|> Vl.encode_field(:x, "document", type: :nominal, title: "Document")
+|> Vl.encode_field(:y, "query", type: :nominal, title: "Query")
+|> Vl.encode_field(:color, "similarity",
+  type: :quantitative,
+  scale: [scheme: "blues"],
+  title: "Similarity"
+)
+```
+
+## 6. Pipeline (Modular RAG)
+
+For complex questions, Sorana provides `Sorana.Pipeline` with retrieval gating, multi-hop reasoning, query expansion, and re-ranking. Each step is a behaviour you can replace, and the pipeline is composed at code time (you decide the order).
+
+If you want the LLM to drive the control flow at runtime instead, see `Sorana.Loop` later in this notebook.
+
+### Define an LLM Function
+
+The pipeline needs an LLM to make decisions. Let's create a simple mock:
+
+```elixir
+# Mock LLM that returns structured responses
+# In production, use OpenAI, Anthropic, or another provider
+mock_llm = fn prompt ->
+  cond do
+    # Gate: decide if retrieval is needed
+    prompt =~ "needs_retrieval" ->
+      if prompt =~ "2 + 2" or prompt =~ "basic" do
+        {:ok, ~s({"needs_retrieval": false, "reasoning": "Basic knowledge"})}
+      else
+        {:ok, ~s({"needs_retrieval": true, "reasoning": "Domain-specific"})}
+      end
+
+    prompt =~ "collections" ->
+      # Select relevant collections
+      {:ok, ~s({"collections": ["languages", "frameworks"], "reasoning": "Question covers both"})}
+
+    prompt =~ "sub_questions" or prompt =~ "decompose" ->
+      # Decompose into simpler questions
+      {:ok, ~s({"sub_questions": ["What is Elixir?", "What is Phoenix?"], "reasoning": "Two distinct topics"})}
+
+    # Reason: evaluate if results are sufficient
+    prompt =~ "sufficient" ->
+      {:ok, ~s({"sufficient": true, "reasoning": "Results contain needed info"})}
+
+    prompt =~ "Answer" ->
+      # Generate answer from context
+      {:ok, "Based on the context, Elixir is a functional language on BEAM, and Phoenix is its web framework with real-time capabilities."}
+
+    true ->
+      {:ok, "Default response"}
+  end
+end
+```
+
+### Simple RAG: Search → Answer
+
+```elixir
+alias Sorana.Pipeline
+
+# First, we need a repo-like interface for the pipeline
+# Since we're using memory backend, we'll work directly with VectorStore
+
+# Simple search and answer
+ctx =
+  Pipeline.new("Tell me about Elixir and its web framework",
+    repo: nil,  # Not using database
+    llm: mock_llm,
+    limit: 3
+  )
+
+# Manual search since we're using custom vector store
+{:ok, query_embedding} = Sorana.Embedder.embed(Sorana.embedder(), ctx.question)
+
+lang_results = VectorStore.search("languages", query_embedding,
+  vector_store: {:memory, pid: memory_pid}, limit: 2)
+
+fw_results = VectorStore.search("frameworks", query_embedding,
+  vector_store: {:memory, pid: memory_pid}, limit: 2)
+
+# Combine results
+all_results = (lang_results ++ fw_results) |> Enum.map(fn r ->
+  %{id: r.id, text: r.metadata.text, score: r.score}
+end)
+
+IO.puts("Retrieved #{length(all_results)} chunks:")
+for r <- all_results do
+  IO.puts("  - #{r.id} (#{Float.round(r.score, 3)})")
+end
+```
+
+### Generate Answer with Context
+
+```elixir
+# Build context for the LLM
+context_text = all_results
+|> Enum.map(& &1.text)
+|> Enum.join("\n\n---\n\n")
+
+prompt = """
+Answer the question based on the following context.
+
+Question: "Tell me about Elixir and its web framework"
+
+Context:
+#{context_text}
+"""
+
+{:ok, answer} = mock_llm.(prompt)
+IO.puts("Answer:\n#{answer}")
+```
+
+## 7. Hybrid Search with RRF
+
+Hybrid search combines semantic and fulltext results. The approach differs by backend:
+
+- **pgvector backend**: Uses a single SQL query with weighted score combination and min-max normalization. Supports `semantic_weight` and `fulltext_weight` options.
+- **Memory backend**: Uses two separate queries combined with Reciprocal Rank Fusion (RRF).
+
+Since we're using the memory backend in this tutorial, let's implement RRF:
+
+```elixir
+defmodule HybridSearch do
+  @doc """
+  Combines semantic and fulltext results using RRF.
+
+  RRF score = sum(1 / (k + rank)) where k=60
+  """
+  def search(collection, query, vector_store_opts, limit \\ 5) do
+    k = 60
+
+    # Get query embedding for semantic search
+    {:ok, query_embedding} = Sorana.Embedder.embed(Sorana.embedder(), query)
+
+    # Semantic results
+    semantic = Sorana.VectorStore.search(collection, query_embedding,
+      Keyword.merge(vector_store_opts, limit: limit * 2))
+
+    # Fulltext results
+    fulltext = Sorana.VectorStore.search_text(collection, query,
+      Keyword.merge(vector_store_opts, limit: limit * 2))
+
+    # Build rank maps
+    semantic_ranks = semantic
+    |> Enum.with_index(1)
+    |> Map.new(fn {r, rank} -> {r.id, rank} end)
+
+    fulltext_ranks = fulltext
+    |> Enum.with_index(1)
+    |> Map.new(fn {r, rank} -> {r.id, rank} end)
+
+    # Get all unique results
+    all_results = (semantic ++ fulltext)
+    |> Enum.uniq_by(& &1.id)
+    |> Map.new(fn r -> {r.id, r} end)
+
+    # Calculate RRF scores
+    all_results
+    |> Enum.map(fn {id, result} ->
+      s_rank = Map.get(semantic_ranks, id, 1000)
+      f_rank = Map.get(fulltext_ranks, id, 1000)
+      rrf_score = 1/(k + s_rank) + 1/(k + f_rank)
+
+      %{result | score: rrf_score}
+    end)
+    |> Enum.sort_by(& &1.score, :desc)
+    |> Enum.take(limit)
+  end
+end
+```
+
+```elixir
+# Compare hybrid vs semantic only
+query = "BEAM concurrency"
+
+{:ok, query_embedding} = Sorana.Embedder.embed(Sorana.embedder(), query)
+
+semantic_only = VectorStore.search("languages", query_embedding,
+  vector_store: {:memory, pid: memory_pid}, limit: 3)
+
+hybrid = HybridSearch.search("languages", query,
+  [vector_store: {:memory, pid: memory_pid}], 3)
+
+IO.puts("Query: '#{query}'\n")
+
+IO.puts("Semantic only:")
+for r <- semantic_only, do: IO.puts("  #{r.id}: #{Float.round(r.score, 3)}")
+
+IO.puts("\nHybrid (RRF):")
+for r <- hybrid, do: IO.puts("  #{r.id}: #{Float.round(r.score, 4)}")
+```
+
+## 8. Score Distribution Visualization
+
+```elixir
+# Get all scores for a query
+query = "programming language features"
+{:ok, query_embedding} = Sorana.Embedder.embed(Sorana.embedder(), query)
+
+all_scores = VectorStore.search("languages", query_embedding,
+  vector_store: {:memory, pid: memory_pid}, limit: 10)
+|> Enum.map(fn r ->
+  %{document: r.id, score: r.score, type: "semantic"}
+end)
+
+fulltext_scores = VectorStore.search_text("languages", query,
+  vector_store: {:memory, pid: memory_pid}, limit: 10)
+|> Enum.map(fn r ->
+  %{document: r.id, score: r.score, type: "fulltext"}
+end)
+
+combined = all_scores ++ fulltext_scores
+
+Vl.new(width: 500, height: 300, title: "Score Comparison: '#{query}'")
+|> Vl.data_from_values(combined)
+|> Vl.mark(:bar)
+|> Vl.encode_field(:x, "document", type: :nominal, axis: [label_angle: -45])
+|> Vl.encode_field(:y, "score", type: :quantitative)
+|> Vl.encode_field(:color, "type", type: :nominal)
+|> Vl.encode_field(:x_offset, "type", type: :nominal)
+```
+
+## 9. Query Rewriting
+
+Query rewriting cleans up conversational input into clear search queries. This is essential when questions come from chatbots or voice interfaces.
+
+### How It Works
+
+The `Pipeline.rewrite/2` step uses an LLM to remove conversational noise while preserving important terms:
+
+```
+Original: "Hey, I was wondering if you could tell me about Elixir"
+Rewritten: "about Elixir"
+
+Original: "So like, can you compare Python and Rust for me?"
+Rewritten: "compare Python and Rust"
+```
+
+### Example with Mock LLM
+
+```elixir
+# Mock LLM that rewrites queries
+rewrite_llm = fn prompt ->
+  cond do
+    prompt =~ "Hey" or prompt =~ "wondering" ->
+      {:ok, "about Elixir"}
+
+    prompt =~ "So like" or prompt =~ "for me" ->
+      {:ok, "compare Python and Rust"}
+
+    true ->
+      {:ok, prompt}
+  end
+end
+
+# Using with Pipeline
+# ctx = Pipeline.new("Hey, can you tell me about Elixir?", repo: nil, llm: rewrite_llm)
+#   |> Pipeline.rewrite()
+# ctx.rewritten_query => "about Elixir"
+
+IO.puts("Query rewriting removes conversational noise for better retrieval")
+```
+
+### Rewrite vs Expand
+
+| Step | Purpose | Use When |
+|------|---------|----------|
+| `rewrite/2` | Cleans conversational input | Chatbots, voice interfaces |
+| `expand/2` | Adds synonyms | Short queries, abbreviations, jargon |
+
+You can combine both (rewrite runs first):
+
+```elixir
+# ctx = Pipeline.new("Hey, tell me about ML", ...)
+#   |> Pipeline.rewrite()    # "Hey, tell me about ML" → "about ML"
+#   |> Pipeline.expand()     # "about ML" → "about ML machine learning..."
+#   |> Pipeline.search()
+```
+
+## 10. Query Expansion
+
+Query expansion improves search results by adding synonyms and related terms to your search queries. This is useful when users search with abbreviations (e.g., "ML" instead of "machine learning").
+
+### How It Works
+
+The `Pipeline.expand/2` step uses an LLM to analyze your query and add related terms:
+
+```
+Original: "ML models"
+Expanded: "ML machine learning artificial intelligence models algorithms neural networks"
+```
+
+### Example with Mock LLM
+
+```elixir
+# Mock LLM that expands queries
+expand_llm = fn prompt ->
+  cond do
+    prompt =~ "ML" or prompt =~ "machine learning" ->
+      {:ok, "ML machine learning artificial intelligence models algorithms deep learning neural networks"}
+
+    prompt =~ "API" ->
+      {:ok, "API application programming interface REST GraphQL endpoints HTTP requests"}
+
+    true ->
+      {:ok, prompt}
+  end
+end
+
+# Using with Pipeline
+alias Sorana.Pipeline
+
+# First ingest a document about ML
+{:ok, _} = Sorana.ingest(
+  "Deep learning is a subset of machine learning that uses neural networks.",
+  repo: nil,
+  vector_store: {:memory, pid: memory_pid},
+  collection: "tech-docs"
+)
+
+# The expand step would add synonyms before search
+# ctx = Pipeline.new("ML", repo: nil, llm: expand_llm) |> Pipeline.expand()
+# ctx.expanded_query => "ML machine learning artificial intelligence..."
+
+IO.puts("Query expansion adds synonyms to improve recall")
+```
+
+### Expand vs. Decompose
+
+| Step | Purpose | Use When |
+|------|---------|----------|
+| `expand/2` | Adds synonyms | Short queries, abbreviations, jargon |
+| `decompose/2` | Splits into sub-questions | Complex, multi-part questions |
+
+You can combine both:
+
+```elixir
+# ctx = Pipeline.new("What is ML and how does it work?", ...)
+#   |> Pipeline.expand()      # Adds synonyms
+#   |> Pipeline.decompose()   # Splits into sub-questions
+#   |> Pipeline.search()
+```
+
+## 11. Re-ranking
+
+Re-ranking improves search result quality by scoring each retrieved chunk's relevance to the question, then filtering and re-sorting by score.
+
+### How It Works
+
+```
+Retrieved chunks: [chunk1, chunk2, chunk3, chunk4, chunk5]
+                      ↓
+LLM scores each:  [  9,     3,      8,     2,      7  ]
+                      ↓
+Filter (≥7):      [chunk1,         chunk3,        chunk5]
+                      ↓
+Sort by score:    [chunk1, chunk3, chunk5]  # 9, 8, 7
+```
+
+### Using the Default Reranker
+
+```elixir
+# Mock LLM that scores relevance
+scoring_llm = fn prompt ->
+  cond do
+    prompt =~ "functional programming" and prompt =~ "Rate how relevant" ->
+      {:ok, ~s({"score": 9, "reasoning": "directly relevant"})}
+
+    prompt =~ "weather" and prompt =~ "Rate how relevant" ->
+      {:ok, ~s({"score": 2, "reasoning": "not relevant"})}
+
+    prompt =~ "Rate how relevant" ->
+      {:ok, ~s({"score": 5, "reasoning": "somewhat relevant"})}
+
+    true ->
+      {:ok, "Elixir is a functional programming language."}
+  end
+end
+
+# Rerank filters low-scoring chunks
+# ctx = Pipeline.new("What is Elixir?", ...)
+#   |> Pipeline.search()
+#   |> Pipeline.rerank(threshold: 7)  # Keep only chunks scoring 7+
+
+IO.puts("Re-ranking filters out irrelevant chunks")
+```
+
+### Custom Reranker
+
+Implement the `Sorana.Reranker` behaviour for custom scoring logic:
+
+```elixir
+defmodule MyKeywordReranker do
+  @behaviour Sorana.Reranker
+
+  @impl Sorana.Reranker
+  def rerank(_question, chunks, opts) do
+    threshold = Keyword.get(opts, :threshold, 5)
+
+    scored_chunks =
+      chunks
+      |> Enum.map(fn chunk ->
+        score = if chunk.text =~ "Elixir", do: 10, else: 3
+        {chunk, score}
+      end)
+      |> Enum.filter(fn {_chunk, score} -> score >= threshold end)
+      |> Enum.sort_by(fn {_chunk, score} -> score end, :desc)
+      |> Enum.map(fn {chunk, _score} -> chunk end)
+
+    {:ok, scored_chunks}
+  end
+end
+
+# Use with: Pipeline.rerank(ctx, reranker: MyKeywordReranker)
+```
+
+### Full Pipeline
+
+```elixir
+# Complete agentic RAG pipeline:
+# ctx = Pipeline.new("What is Elixir?", repo: MyApp.Repo, llm: my_llm)
+#   |> Pipeline.rewrite()                    # Clean up conversational input
+#   |> Pipeline.select()                     # Choose collections
+#   |> Pipeline.expand()                     # Add synonyms
+#   |> Pipeline.search()                     # Retrieve chunks
+#   |> Pipeline.rerank()                     # Filter by relevance
+#   |> Pipeline.answer(self_correct: true)   # Generate and refine answer
+
+IO.puts("The full pipeline: rewrite → select → expand → search → rerank → answer")
+```
+
+## 12. GraphRAG with Memory Backend
+
+GraphRAG enhances retrieval by building a knowledge graph from your documents. Previously this required pgvector, but now the memory backend also supports GraphRAG.
+
+### Start the Memory Graph Store
+
+```elixir
+# Start the in-memory graph store
+{:ok, graph_pid} = Sorana.Graph.GraphStore.Memory.start_link(name: nil)
+
+IO.puts("Memory graph store started: #{inspect(graph_pid)}")
+```
+
+### How GraphRAG Works
+
+When you ingest with `graph: true`:
+1. **Entity extraction** - Named entities (people, organizations, etc.) are extracted from each chunk
+2. **Relationship extraction** - Semantic relationships between entities are identified
+3. **Graph storage** - Entities, relationships, and chunk mentions are persisted
+4. **Community detection** - Clusters of related entities are identified
+
+When you search with `graph: true`:
+1. **Query entities** - Entities are extracted from your query
+2. **Graph traversal** - Related chunks are found via entity relationships
+3. **Fusion** - Graph results are combined with vector results using Reciprocal Rank Fusion
+
+### Using GraphRAG with Memory Backend
+
+```elixir
+# Note: In a real application, you'd use:
+# Sorana.ingest(text, graph: true, graph_store: {:memory, pid: graph_pid})
+# Sorana.search(query, graph: true, graph_store: {:memory, pid: graph_pid})
+
+# The graph store can also be named for easier reference:
+# {:ok, _} = Sorana.Graph.GraphStore.Memory.start_link(name: :my_graph)
+# Sorana.ingest(text, graph: true, graph_store: {:memory, name: :my_graph})
+
+IO.puts("""
+GraphRAG with memory backend:
+- No database setup required
+- Ideal for testing and experimentation
+- Data is not persisted (lost when process stops)
+- Same API as Ecto backend
+
+For production, use the Ecto backend which persists to PostgreSQL.
+""")
+```
+
+### Self-Correcting Answers
+
+The `answer/2` step can evaluate and refine answers to ensure they're grounded in the context:
+
+```elixir
+# ctx = Pipeline.new("What is Elixir?", repo: MyApp.Repo, llm: my_llm)
+#   |> Pipeline.search()
+#   |> Pipeline.rerank()
+#   |> Pipeline.answer(self_correct: true, max_corrections: 2)
+#
+# ctx.answer            # Final (possibly refined) answer
+# ctx.correction_count  # Number of corrections made
+# ctx.corrections       # List of {previous_answer, feedback} tuples
+
+IO.puts("""
+Self-correction flow:
+1. Generate initial answer
+2. Evaluate if grounded in context
+3. If not grounded, regenerate with feedback
+4. Repeat up to max_corrections times
+""")
+```
+
+### Explicit Collection Selection
+
+You can skip LLM-based collection selection by passing `:collection` or `:collections` directly to `search/2`:
+
+```elixir
+# Search a specific collection without using select/2
+# ctx = Pipeline.new("How do I deploy Phoenix?", repo: MyApp.Repo, llm: my_llm)
+#   |> Pipeline.search(collection: "deployment-docs")
+#   |> Pipeline.answer()
+
+# Search multiple specific collections
+# ctx = Pipeline.new("What are the best practices?", repo: MyApp.Repo, llm: my_llm)
+#   |> Pipeline.search(collections: ["docs", "tutorials"])
+#   |> Pipeline.answer()
+
+IO.puts("""
+Collection selection priority:
+1. :collection/:collections option passed to search/2
+2. ctx.collections (set by select/2)
+3. Falls back to "default" collection
+
+Use explicit collections when:
+- You have only one collection
+- User explicitly chooses the collection(s)
+- You want deterministic routing without LLM overhead
+""")
+```
+
+## 13. Grounding & Chunk Attribution
+
+After generating an answer, `ground/2` checks if each part is faithful to the retrieved context. It labels every token as faithful or hallucinated, merges them into spans, and attributes each span back to specific chunks using word overlap.
+
+### How It Works
+
+```
+Answer tokens:   "Elixir" "was" "invented" "in" "2010" "by" "José"
+Labels:           faith   faith   halluc   halluc halluc faith faith
+                    ↓                 ↓                    ↓
+Faithful spans:  ["Elixir was", "by José"]    Hallucinated: ["invented in 2010"]
+                    ↓                                ↓
+Attribution:     sources: [chunk_2: 1.0]       sources: [chunk_1: 0.75]
+```
+
+### Using Grounding in the Pipeline
+
+```elixir
+# In a real pipeline with Hallmark:
+# ctx = Pipeline.new("When was Elixir created?", repo: repo, llm: llm)
+#   |> Pipeline.search(collection: "docs")
+#   |> Pipeline.answer()
+#   |> Pipeline.ground()
+#
+# ctx.grounding.score              # 0.85 (weighted average consistency)
+# ctx.grounding.hallucinated_spans # sentences the model flagged
+# ctx.grounding.faithful_spans     # sentences backed by context
+
+IO.puts("""
+Grounding result fields:
+- score: weighted average consistency score (0.0 to 1.0)
+- hallucinated_spans: unsupported sentences in the answer
+- faithful_spans: sentences backed by retrieved context
+""")
+```
+
+### Chunk Attribution
+
+Each span carries a `:sources` list linking it to context chunks by word overlap:
+
+```elixir
+# Every span has sources: [%{chunk_id: term(), score: float()}]
+# Score = fraction of span words found in that chunk
+
+# Find fully invented claims (no overlap with any chunk)
+# fully_invented =
+#   Enum.filter(ctx.grounding.hallucinated_spans, &(&1.sources == []))
+
+# Find contradictions (high word overlap but still hallucinated)
+# contradicted =
+#   ctx.grounding.hallucinated_spans
+#   |> Enum.flat_map(fn span ->
+#     span.sources
+#     |> Enum.filter(&(&1.score > 0.5))
+#     |> Enum.map(&{span.text, &1.chunk_id})
+#   end)
+
+# See which chunks actually supported the answer
+# cited_chunk_ids =
+#   ctx.grounding.faithful_spans
+#   |> Enum.flat_map(& &1.sources)
+#   |> Enum.map(& &1.chunk_id)
+#   |> Enum.uniq()
+
+IO.puts("""
+Attribution patterns:
+- Empty sources on hallucinated span → fully invented
+- High overlap + hallucinated → words match but facts wrong (contradiction)
+- faithful_spans sources → chunks that backed the answer
+""")
+```
+
+### Custom Grounder
+
+Replace the default Hallmark grounder with your own logic:
+
+```elixir
+# Module-based
+# defmodule MyGrounder do
+#   @behaviour Sorana.Grounder
+#
+#   @impl true
+#   def ground(answer, chunks, _opts) do
+#     {:ok, %Sorana.Grounding.Result{
+#       score: 1.0,
+#       hallucinated_spans: [],
+#       faithful_spans: []
+#     }}
+#   end
+# end
+
+# Inline function
+# Pipeline.ground(ctx, grounder: fn answer, chunks, _opts ->
+#   {:ok, %Sorana.Grounding.Result{score: 1.0, hallucinated_spans: [], faithful_spans: []}}
+# end)
+
+IO.puts("Grounding is pluggable: use Hallmark, a custom module, or an inline function")
+```
+
+## Summary
+
+| Concept | Description |
+|---------|-------------|
+| **Memory Backend** | HNSWLib-based in-memory store, no database needed |
+| **Semantic Search** | Finds similar meaning using embeddings |
+| **Fulltext Search** | Matches exact keywords with TF-IDF scoring |
+| **Hybrid Search** | Combines both using Reciprocal Rank Fusion |
+| **Collections** | Organize documents into logical groups |
+| **Retrieval Gating** | Skip retrieval for questions answerable from knowledge |
+| **Query Rewriting** | Clean conversational input into clear queries |
+| **Query Expansion** | Add synonyms for better recall |
+| **Multi-hop Reasoning** | Search again if results are insufficient |
+| **Re-ranking** | Filter chunks by LLM-scored relevance |
+| **Pipeline (Modular RAG)** | Gate → Rewrite → Select → Expand → Search → Reason → Rerank → Answer → Ground. You compose the steps. |
+| **Loop (Agentic RAG)** | LLM picks tools each turn (`search` / `answer` / `give_up`). The model decides the control flow, including when to refine queries and when to issue separate searches for different aspects of a question. |
+| **Controller / answerer split** | In `Sorana.Loop`, pair a cheap controller LLM (picks tools) with a stronger answerer LLM (writes the user-facing answer) via `controller_llm:` and `answer_llm:` |
+| **Grounding** | Detect hallucinated vs faithful spans with chunk attribution. Available on both Pipeline (`Pipeline.ground/2`) and Loop (`Loop.ground/2`), sharing the same `Sorana.Grounder` behaviour. |
+| **GraphRAG** | Knowledge graph with entity extraction (supports memory and Ecto backends) |
+
+### Next Steps
+
+1. Try with real documents (PDFs, markdown files)
+2. Connect to pgvector for persistence
+3. Use a real LLM (OpenAI, Anthropic, Z.ai) for the pipeline
+4. Try `Sorana.Loop` for open-ended questions where the right sequence of searches isn't knowable upfront (see the [Loop guide](../guides/loop.md))
+5. Add to your Phoenix application with the dashboard
+6. Enable GraphRAG for entity-based retrieval (see the [GraphRAG guide](../guides/graphrag.md))
+
+```elixir
+# Cleanup
+GenServer.stop(memory_pid)
+if Process.alive?(graph_pid), do: GenServer.stop(graph_pid)
+IO.puts("Memory stores stopped")
+```

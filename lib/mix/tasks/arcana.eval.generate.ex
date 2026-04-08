@@ -1,4 +1,4 @@
-defmodule Mix.Tasks.Arcana.Eval.Generate do
+defmodule Mix.Tasks.Sorana.Eval.Generate do
   @shortdoc "Generate synthetic test cases for retrieval evaluation"
 
   @moduledoc """
@@ -51,7 +51,7 @@ defmodule Mix.Tasks.Arcana.Eval.Generate do
       |> maybe_add(:source_id, source_id)
       |> maybe_add(:collection, collection)
 
-    case Arcana.Evaluation.generate_test_cases(generation_opts) do
+    case Sorana.Evaluation.generate_test_cases(generation_opts) do
       {:ok, test_cases} ->
         IO.puts("Generated #{length(test_cases)} test cases")
 

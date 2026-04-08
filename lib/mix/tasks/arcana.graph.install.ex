@@ -1,6 +1,6 @@
 if Code.ensure_loaded?(Igniter) do
-  defmodule Mix.Tasks.Arcana.Graph.Install do
-    @shortdoc "Installs GraphRAG tables for Arcana"
+  defmodule Mix.Tasks.Sorana.Graph.Install do
+    @shortdoc "Installs GraphRAG tables for Sorana"
     @moduledoc """
     Generates the migration for GraphRAG tables.
 
@@ -32,7 +32,7 @@ if Code.ensure_loaded?(Igniter) do
 
     Or enable per-call:
 
-        Arcana.ingest(text, repo: MyApp.Repo, graph: true)
+        Sorana.ingest(text, repo: MyApp.Repo, graph: true)
     """
 
     use Igniter.Mix.Task
@@ -85,12 +85,12 @@ if Code.ensure_loaded?(Igniter) do
 
           children = [
             # ... existing children ...
-            Arcana.Graph.NERServing
+            Sorana.Graph.NERServing
           ]
 
       4. Use GraphRAG during ingestion:
 
-          Arcana.ingest(text, repo: #{inspect(repo_module)}, graph: true)
+          Sorana.ingest(text, repo: #{inspect(repo_module)}, graph: true)
 
       See the GraphRAG guide for more details.
       """)
@@ -110,7 +110,7 @@ if Code.ensure_loaded?(Igniter) do
       path = Path.join(migrations_path, filename)
 
       migration_content = """
-      defmodule #{inspect(repo_module)}.Migrations.CreateArcanaGraphTables do
+      defmodule #{inspect(repo_module)}.Migrations.CreateSoranaGraphTables do
         use Ecto.Migration
 
         def up do
@@ -204,8 +204,8 @@ if Code.ensure_loaded?(Igniter) do
     end
   end
 else
-  defmodule Mix.Tasks.Arcana.Graph.Install do
-    @shortdoc "Generates GraphRAG migration for Arcana"
+  defmodule Mix.Tasks.Sorana.Graph.Install do
+    @shortdoc "Generates GraphRAG migration for Sorana"
     @moduledoc """
     Generates the migration file for GraphRAG tables.
 
@@ -230,7 +230,7 @@ else
     import Mix.Generator
 
     @migration_template """
-    defmodule <%= @repo %>.Migrations.CreateArcanaGraphTables do
+    defmodule <%= @repo %>.Migrations.CreateSoranaGraphTables do
       use Ecto.Migration
 
       def up do
@@ -358,12 +358,12 @@ else
 
           children = [
             # ... existing children ...
-            Arcana.Graph.NERServing
+            Sorana.Graph.NERServing
           ]
 
       4. Use GraphRAG during ingestion:
 
-          Arcana.ingest(text, repo: MyApp.Repo, graph: true)
+          Sorana.ingest(text, repo: MyApp.Repo, graph: true)
 
       See the GraphRAG guide for more details.
       """)

@@ -1,31 +1,31 @@
 # Loop (Agentic RAG)
 
-`Arcana.Loop` is Arcana's Agentic RAG surface: an LLM-driven tool loop where the controller picks tools each turn until it has enough context to answer the question, runs out of budget, or admits defeat.
+`Sorana.Loop` is Sorana's Agentic RAG surface: an LLM-driven tool loop where the controller picks tools each turn until it has enough context to answer the question, runs out of budget, or admits defeat.
 
-This is the "Agentic RAG" pattern from Singh et al.'s 2025 [survey](https://arxiv.org/abs/2501.09136), as opposed to the static `Arcana.Pipeline` you compose ahead of time. Both patterns coexist in Arcana and target different problems.
+This is the "Agentic RAG" pattern from Singh et al.'s 2025 [survey](https://arxiv.org/abs/2501.09136), as opposed to the static `Sorana.Pipeline` you compose ahead of time. Both patterns coexist in Sorana and target different problems.
 
 ## When to use Loop
 
-Reach for `Arcana.Loop` when **the right sequence of searches isn't knowable upfront**. The LLM decides whether to search again, how to refine the query, and when to answer. Typical reasons:
+Reach for `Sorana.Loop` when **the right sequence of searches isn't knowable upfront**. The LLM decides whether to search again, how to refine the query, and when to answer. Typical reasons:
 
 - Open-ended exploratory questions ("what do we know about X")
 - Multi-hop questions where each search depends on what the previous one returned
 - Questions where the user's phrasing might or might not need rewriting, and you'd rather have the model decide
 - "Find all the X" enumeration questions that benefit from iterative searching across different aspects
 
-If you know the right pipeline ahead of time, use [`Arcana.Pipeline`](pipeline.md) — it's faster, cheaper, more predictable, and easier to debug.
+If you know the right pipeline ahead of time, use [`Sorana.Pipeline`](pipeline.md) — it's faster, cheaper, more predictable, and easier to debug.
 
-If you just want a question answered with sensible defaults, use `Arcana.ask/2` — it's a one-call wrapper over the same primitives.
+If you just want a question answered with sensible defaults, use `Sorana.ask/2` — it's a one-call wrapper over the same primitives.
 
 ## Quick start
 
 ```elixir
 {:ok, ctx} =
-  Arcana.Loop.new("Find episodes where a Time Lord betrayed the Doctor",
+  Sorana.Loop.new("Find episodes where a Time Lord betrayed the Doctor",
     repo: MyApp.Repo,
     collection: "doctor-who"
   )
-  |> Arcana.Loop.run(controller_llm: "openai:gpt-4o-mini")
+  |> Sorana.Loop.run(controller_llm: "openai:gpt-4o-mini")
 
 ctx.answer            # the final answer text
 ctx.tool_history      # list of tool calls the controller made, in order
@@ -60,7 +60,7 @@ Loop ships with **three tools**:
 
 Query refinement and decomposition aren't separate tools — the system prompt tells the controller to mentally rewrite vague user questions before searching, and to issue sequential `search` calls with focused queries when a question covers multiple aspects.
 
-To customize, pass `tools: [...]` to `Loop.run/2` with your own list of `ReqLLM.Tool` structs. Custom tools that mutate loop state need a matching clause in `Tools.execute/4`. See `Arcana.Loop.Tools` for the schemas of the default tools.
+To customize, pass `tools: [...]` to `Loop.run/2` with your own list of `ReqLLM.Tool` structs. Custom tools that mutate loop state need a matching clause in `Tools.execute/4`. See `Sorana.Loop.Tools` for the schemas of the default tools.
 
 ### What the controller sees from a search
 
@@ -85,14 +85,14 @@ The cap on total chunks accumulated across the loop is governed by `:chunk_cap` 
 ## Configuration
 
 ```elixir
-Arcana.Loop.new(question, opts) |> Arcana.Loop.run(opts)
+Sorana.Loop.new(question, opts) |> Sorana.Loop.run(opts)
 ```
 
 `new/2` options:
 
 | Option | Default | Description |
 |---|---|---|
-| `:repo` | `Arcana.Config.get(opts, :repo)` | Ecto repo for retrieval tools |
+| `:repo` | `Sorana.Config.get(opts, :repo)` | Ecto repo for retrieval tools |
 | `:collection` | `nil` | Single collection name to scope searches to |
 | `:collections` | `[nil]` | List of collection names (overrides `:collection`) |
 
@@ -108,13 +108,13 @@ Arcana.Loop.new(question, opts) |> Arcana.Loop.run(opts)
 | `:chunk_cap` | `30` | Maximum chunks accumulated across iterations. Lowest-scored evicted first. |
 | `:fallback_synthesis` | `true` | When `max_iterations` is hit without `answer`, do one final tool-less LLM call to synthesize from accumulated chunks |
 | `:synthesizer` | default | Override the synthesis function for the fallback path. `(messages, opts) -> {:ok, text}`. The default uses `:answer_llm` if set, otherwise `:controller_llm`. |
-| `:search_fn` | `&Arcana.search/2` | Override `Arcana.search/2` for the built-in `search` tool. Test-only. |
-| `:search_opts` | `[]` | Extra options forwarded to the search tool's call into `Arcana.search/2` |
+| `:search_fn` | `&Sorana.search/2` | Override `Sorana.search/2` for the built-in `search` tool. Test-only. |
+| `:search_opts` | `[]` | Extra options forwarded to the search tool's call into `Sorana.search/2` |
 
 You can also set defaults globally:
 
 ```elixir
-config :arcana, loop: [
+config :sorana, loop: [
   controller_llm: "openai:gpt-4o-mini",
   max_iterations: 10,
   chunk_cap: 30
@@ -144,11 +144,11 @@ Loop's fix is graceful degradation: when `max_iterations` is hit and chunks have
 # Default synthesizer: appends an instruction to the running conversation,
 # calls the controller_llm without tools, and returns the text.
 {:ok, ctx} =
-  Arcana.Loop.new("Which Time Lords have betrayed the Doctor?",
+  Sorana.Loop.new("Which Time Lords have betrayed the Doctor?",
     repo: MyApp.Repo,
     collection: "doctor-who"
   )
-  |> Arcana.Loop.run(controller_llm: "zai:glm-4.6", max_iterations: 6)
+  |> Sorana.Loop.run(controller_llm: "zai:glm-4.6", max_iterations: 6)
 
 ctx.terminated_by     # :max_iterations
 ctx.answer            # "Based on the available information, several Time Lords..."
@@ -157,7 +157,7 @@ ctx.answer            # "Based on the available information, several Time Lords.
 To disable, pass `fallback_synthesis: false`. If you want a different model for the synthesis call than the controller, the simplest way is `:answer_llm` (see [Controller / answerer split](#controller--answerer-split)) — it acts as the default synthesizer when set. If you need full control over the synthesis call (custom prompt, postprocessing, retries), pass `:synthesizer` directly:
 
 ```elixir
-Arcana.Loop.run(ctx,
+Sorana.Loop.run(ctx,
   controller_llm: "zai:glm-4.5-flash",
   synthesizer: fn messages, _opts ->
     case ReqLLM.generate_text("zai:glm-4.6", messages) do
@@ -170,7 +170,7 @@ Arcana.Loop.run(ctx,
 
 ## The system prompt
 
-The default prompt (`Arcana.Loop.SystemPrompt.default/1`) follows current best practices from Anthropic and OpenAI:
+The default prompt (`Sorana.Loop.SystemPrompt.default/1`) follows current best practices from Anthropic and OpenAI:
 
 1. **Structured into named markdown sections** (works across providers; XML tags don't)
 2. **Heavy detail in tool descriptions, not the system prompt** — the prompt sets the role and workflow, the tool descriptions guide selection
@@ -191,7 +191,7 @@ defmodule MyApp.LoopTools do
   alias ReqLLM.Tool
 
   def all do
-    Arcana.Loop.Tools.default() ++ [my_calculator_tool()]
+    Sorana.Loop.Tools.default() ++ [my_calculator_tool()]
   end
 
   defp my_calculator_tool do
@@ -209,7 +209,7 @@ defmodule MyApp.LoopTools do
 end
 ```
 
-The callback on `ReqLLM.Tool` is a placeholder — Loop executes tools itself via `Arcana.Loop.Tools.execute/4` so it can mutate the loop state. You'll need to add a clause to your own dispatch function (or fork `Tools.execute/4`) to handle the new tool.
+The callback on `ReqLLM.Tool` is a placeholder — Loop executes tools itself via `Sorana.Loop.Tools.execute/4` so it can mutate the loop state. You'll need to add a clause to your own dispatch function (or fork `Tools.execute/4`) to handle the new tool.
 
 If you only need to override the search tool without adding new tools, the simpler path is to pass `:search_fn` — see the test suite for an example.
 
@@ -218,7 +218,7 @@ If you only need to override the search tool without adding new tools, the simpl
 Loop supports the standard router/answerer pattern: a cheap fast model picks tools each turn, and a stronger model writes the user-facing answer. Pass both `:controller_llm` and `:answer_llm`.
 
 ```elixir
-Arcana.Loop.run(ctx,
+Sorana.Loop.run(ctx,
   controller_llm: "zai:glm-4.5-flash",  # cheap, fast: picks tools
   answer_llm:     "zai:glm-4.6"         # stronger: writes the final answer
 )
@@ -259,7 +259,7 @@ If you're already running on a frontier model for both, splitting buys you nothi
 Loop emits a single span around the whole run:
 
 ```elixir
-[:arcana, :loop, :start | :stop | :exception]
+[:sorana, :loop, :start | :stop | :exception]
 ```
 
 Stop metadata includes:
@@ -272,7 +272,7 @@ Stop metadata includes:
 | `:iterations` | How many controller turns actually ran |
 | `:terminated_by` | `:answered` / `:gave_up` / `:max_iterations` / `:error` |
 
-For per-tool-call telemetry, attach to the `Arcana.search/2` events emitted from inside the search tool. Grounding (when you call `Loop.ground/2`) emits its own span under `[:arcana, :loop, :ground, :*]` — see the Grounding section below.
+For per-tool-call telemetry, attach to the `Sorana.search/2` events emitted from inside the search tool. Grounding (when you call `Loop.ground/2`) emits its own span under `[:sorana, :loop, :ground, :*]` — see the Grounding section below.
 
 ## Testing
 
@@ -292,26 +292,26 @@ test "loop terminates with :answered when controller calls answer" do
   end
 
   {:ok, ctx} =
-    Arcana.Loop.new("question")
-    |> Arcana.Loop.run(controller_llm: controller)
+    Sorana.Loop.new("question")
+    |> Sorana.Loop.run(controller_llm: controller)
 
   assert ctx.terminated_by == :answered
   assert ctx.answer == "42"
 end
 ```
 
-For multi-turn tests, use a small `Agent` that holds a list of scripted responses and pops one per call. See `test/arcana/loop_test.exs` for the full pattern.
+For multi-turn tests, use a small `Agent` that holds a list of scripted responses and pops one per call. See `test/sorana/loop_test.exs` for the full pattern.
 
 ## Grounding
 
-Loop doesn't run grounding automatically — it's expensive (runs an NLI model via Bumblebee) and you may not need it on every call. When you do want faithfulness scoring, pipe the result into `Arcana.Loop.ground/2`:
+Loop doesn't run grounding automatically — it's expensive (runs an NLI model via Bumblebee) and you may not need it on every call. When you do want faithfulness scoring, pipe the result into `Sorana.Loop.ground/2`:
 
 ```elixir
 {:ok, ctx} =
-  Arcana.Loop.new(question, repo: repo, collection: collection)
-  |> Arcana.Loop.run(controller_llm: llm)
+  Sorana.Loop.new(question, repo: repo, collection: collection)
+  |> Sorana.Loop.run(controller_llm: llm)
 
-ctx = Arcana.Loop.ground(ctx)
+ctx = Sorana.Loop.ground(ctx)
 
 ctx.grounding.score               # 0.0-1.0 faithfulness
 ctx.grounding.hallucinated_spans  # sentences not supported by accumulated chunks
@@ -320,7 +320,7 @@ ctx.grounding.faithful_spans      # supported sentences with chunk-ID attributio
 
 ### What it actually does
 
-`Loop.ground/2` scores the answer in `ctx.answer` against the accumulated chunks in `ctx.chunks` using the configured grounder. The default grounder is `Arcana.Grounder.Hallmark`, which wraps [Hallmark](https://github.com/georgeguimaraes/hallmark) — a local Bumblebee integration for Vectara's HHEM model. Same grounder the Pipeline uses; the behaviour is context-agnostic.
+`Loop.ground/2` scores the answer in `ctx.answer` against the accumulated chunks in `ctx.chunks` using the configured grounder. The default grounder is `Sorana.Grounder.Hallmark`, which wraps [Hallmark](https://github.com/georgeguimaraes/hallmark) — a local Bumblebee integration for Vectara's HHEM model. Same grounder the Pipeline uses; the behaviour is context-agnostic.
 
 Each sentence in the answer gets scored for faithfulness. Supported sentences go into `faithful_spans` with per-sentence chunk attribution (which chunks support the claim). Unsupported sentences go into `hallucinated_spans` with the same shape. The top-level `score` is a length-weighted average.
 
@@ -366,16 +366,16 @@ Grounder errors are swallowed too: if the NLI model fails to load or times out, 
 Use the `:grounder` option to swap in a different implementation:
 
 ```elixir
-# Module implementing Arcana.Grounder
-Arcana.Loop.ground(ctx, grounder: MyApp.CustomGrounder)
+# Module implementing Sorana.Grounder
+Sorana.Loop.ground(ctx, grounder: MyApp.CustomGrounder)
 
 # Or an inline function (answer, chunks, opts) -> {:ok, result} | {:error, reason}
-Arcana.Loop.ground(ctx, grounder: fn answer, chunks, _opts ->
-  {:ok, %Arcana.Grounding.Result{score: score_somehow(answer, chunks)}}
+Sorana.Loop.ground(ctx, grounder: fn answer, chunks, _opts ->
+  {:ok, %Sorana.Grounding.Result{score: score_somehow(answer, chunks)}}
 end)
 ```
 
-The grounder behaviour is `Arcana.Grounder` — shared with Pipeline since the problem shape is the same. A custom grounder you write for Pipeline works for Loop unchanged.
+The grounder behaviour is `Sorana.Grounder` — shared with Pipeline since the problem shape is the same. A custom grounder you write for Pipeline works for Loop unchanged.
 
 ### Telemetry
 
@@ -383,7 +383,7 @@ Grounding emits a span:
 
 | Event | Metadata |
 |---|---|
-| `[:arcana, :loop, :ground, :*]` | `question`, `grounder`, `score`, `hallucinated_span_count`, `faithful_span_count` |
+| `[:sorana, :loop, :ground, :*]` | `question`, `grounder`, `score`, `hallucinated_span_count`, `faithful_span_count` |
 
 ## Caveats
 

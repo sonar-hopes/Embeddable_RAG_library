@@ -1,12 +1,12 @@
-defmodule Arcana.MixProject do
+defmodule Sorana.MixProject do
   use Mix.Project
 
   @version "1.6.0"
-  @source_url "https://github.com/georgeguimaraes/arcana"
+  @source_url "https://github.com/georgeguimaraes/sorana"
 
   def project do
     [
-      app: :arcana,
+      app: :sorana,
       version: @version,
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
@@ -14,7 +14,7 @@ defmodule Arcana.MixProject do
       deps: deps(),
 
       # Hex
-      name: "Arcana",
+      name: "Sorana",
       description: "RAG (Retrieval Augmented Generation) library for Elixir",
       source_url: @source_url,
       package: package(),

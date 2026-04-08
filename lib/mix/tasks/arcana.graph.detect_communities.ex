@@ -1,4 +1,4 @@
-defmodule Mix.Tasks.Arcana.Graph.DetectCommunities do
+defmodule Mix.Tasks.Sorana.Graph.DetectCommunities do
   @moduledoc """
   Detects communities in the knowledge graph using the Leiden algorithm.
 
@@ -80,7 +80,7 @@ defmodule Mix.Tasks.Arcana.Graph.DetectCommunities do
     Mix.Task.run("app.start")
 
     # Read from graph config, allow CLI overrides
-    graph_config = Arcana.Graph.config()
+    graph_config = Sorana.Graph.config()
     resolution = Keyword.get(opts, :resolution, graph_config[:resolution] || 1.0)
     min_size = Keyword.get(opts, :min_size, graph_config[:min_size] || 1)
     max_level = Keyword.get(opts, :max_level, graph_config[:community_levels] || 1)
@@ -100,7 +100,7 @@ defmodule Mix.Tasks.Arcana.Graph.DetectCommunities do
     end
 
     # Show current graph info
-    info = Arcana.Maintenance.graph_info()
+    info = Sorana.Maintenance.graph_info()
     Mix.shell().info("Graph config: #{format_info(info)}")
 
     Mix.shell().info(
@@ -132,7 +132,7 @@ defmodule Mix.Tasks.Arcana.Graph.DetectCommunities do
       if collection, do: Keyword.put(detect_opts, :collection, collection), else: detect_opts
 
     {:ok, %{collections: collections, communities: communities}} =
-      Arcana.Maintenance.detect_communities(repo, detect_opts)
+      Sorana.Maintenance.detect_communities(repo, detect_opts)
 
     Mix.shell().info(
       "\nDone! Processed #{collections} collection(s): #{communities} communities."

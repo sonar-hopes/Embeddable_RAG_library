@@ -16,10 +16,10 @@ Once installed and configured, GraphRAG integrates seamlessly with the existing 
 
 ```elixir
 # Ingest with graph building - extracts entities and relationships automatically
-{:ok, document} = Arcana.ingest(content, repo: MyApp.Repo, graph: true)
+{:ok, document} = Sorana.ingest(content, repo: MyApp.Repo, graph: true)
 
 # Search with fusion - combines vector similarity + entity graph traversal
-{:ok, results} = Arcana.search("Who leads OpenAI?", repo: MyApp.Repo, graph: true)
+{:ok, results} = Sorana.search("Who leads OpenAI?", repo: MyApp.Repo, graph: true)
 ```
 
 When `graph: true` is enabled:
@@ -31,7 +31,7 @@ When `graph: true` is enabled:
 GraphRAG requires additional database tables. Install them separately:
 
 ```bash
-mix arcana.graph.install
+mix sorana.graph.install
 mix ecto.migrate
 ```
 
@@ -43,9 +43,9 @@ Add the NER serving to your supervision tree for entity extraction:
 # lib/my_app/application.ex
 children = [
   MyApp.Repo,
-  Arcana.TaskSupervisor,
-  Arcana.Embedder.Local,
-  Arcana.Graph.NERServing  # Add this for GraphRAG
+  Sorana.TaskSupervisor,
+  Sorana.Embedder.Local,
+  Sorana.Graph.NERServing  # Add this for GraphRAG
 ]
 ```
 
@@ -55,7 +55,7 @@ GraphRAG is disabled by default. Enable it globally:
 
 ```elixir
 # config/config.exs
-config :arcana,
+config :sorana,
   graph: [
     enabled: true,
     community_levels: 5,
@@ -66,8 +66,8 @@ config :arcana,
 Or enable per-call:
 
 ```elixir
-Arcana.ingest(text, repo: MyApp.Repo, graph: true)
-Arcana.search(query, repo: MyApp.Repo, graph: true)
+Sorana.ingest(text, repo: MyApp.Repo, graph: true)
+Sorana.search(query, repo: MyApp.Repo, graph: true)
 ```
 
 ## Components
@@ -76,11 +76,11 @@ GraphRAG uses pluggable behaviours for extraction and community detection:
 
 | Component | Default | Purpose |
 |-----------|---------|---------|
-| GraphExtractor | `Arcana.Graph.GraphExtractor.LLM` | Extract entities + relationships in one LLM call |
-| EntityExtractor | `Arcana.Graph.EntityExtractor.NER` | Extract entities only (fallback) |
-| RelationshipExtractor | `Arcana.Graph.RelationshipExtractor.LLM` | Find relationships (fallback) |
-| CommunityDetector | `Arcana.Graph.CommunityDetector.Leiden` | Detect entity communities |
-| CommunitySummarizer | `Arcana.Graph.CommunitySummarizer.LLM` | Generate community summaries |
+| GraphExtractor | `Sorana.Graph.GraphExtractor.LLM` | Extract entities + relationships in one LLM call |
+| EntityExtractor | `Sorana.Graph.EntityExtractor.NER` | Extract entities only (fallback) |
+| RelationshipExtractor | `Sorana.Graph.RelationshipExtractor.LLM` | Find relationships (fallback) |
+| CommunityDetector | `Sorana.Graph.CommunityDetector.Leiden` | Detect entity communities |
+| CommunitySummarizer | `Sorana.Graph.CommunitySummarizer.LLM` | Generate community summaries |
 
 **Recommended:** Use the combined `GraphExtractor.LLM` for efficiency (1 LLM call per chunk instead of 2).
 
@@ -100,13 +100,13 @@ GraphRAG supports swappable storage backends for graph data:
 # config/config.exs
 
 # Use Ecto/PostgreSQL (default)
-config :arcana, :graph_store, :ecto
+config :sorana, :graph_store, :ecto
 
 # With options
-config :arcana, :graph_store, {:ecto, repo: MyApp.Repo}
+config :sorana, :graph_store, {:ecto, repo: MyApp.Repo}
 
 # Custom module
-config :arcana, :graph_store, MyApp.CustomGraphStore
+config :sorana, :graph_store, MyApp.CustomGraphStore
 ```
 
 ### In-Memory Backend (Testing)
@@ -115,24 +115,24 @@ The memory backend is useful for testing without database dependencies:
 
 ```elixir
 # Start a memory store
-{:ok, pid} = Arcana.Graph.GraphStore.Memory.start_link([])
+{:ok, pid} = Sorana.Graph.GraphStore.Memory.start_link([])
 
 # Use in tests
-Arcana.ingest(text, graph_store: {:memory, pid: pid})
-Arcana.search(query, graph_store: {:memory, pid: pid})
+Sorana.ingest(text, graph_store: {:memory, pid: pid})
+Sorana.search(query, graph_store: {:memory, pid: pid})
 
 # Or with a named process
-{:ok, _} = Arcana.Graph.GraphStore.Memory.start_link(name: :test_graph)
-Arcana.ingest(text, graph_store: {:memory, name: :test_graph})
+{:ok, _} = Sorana.Graph.GraphStore.Memory.start_link(name: :test_graph)
+Sorana.ingest(text, graph_store: {:memory, name: :test_graph})
 ```
 
 ### Custom Backend
 
-Implement the `Arcana.Graph.GraphStore` behaviour. The full interface includes storage, query, deletion, and listing callbacks:
+Implement the `Sorana.Graph.GraphStore` behaviour. The full interface includes storage, query, deletion, and listing callbacks:
 
 ```elixir
 defmodule MyApp.Neo4jGraphStore do
-  @behaviour Arcana.Graph.GraphStore
+  @behaviour Sorana.Graph.GraphStore
 
   # === Storage Callbacks ===
 
@@ -249,7 +249,7 @@ defmodule MyApp.Neo4jGraphStore do
 end
 ```
 
-See `Arcana.Graph.GraphStore` for the complete callback documentation.
+See `Sorana.Graph.GraphStore` for the complete callback documentation.
 
 ## Building a Graph
 
@@ -259,24 +259,24 @@ The combined `GraphExtractor.LLM` extracts entities and relationships in a singl
 
 ```elixir
 # config/runtime.exs - Enable combined extractor globally
-config :arcana,
+config :sorana,
   llm: {"openai:gpt-4o-mini", api_key: System.get_env("OPENAI_API_KEY")},
   graph: [
     enabled: true,
-    extractor: Arcana.Graph.GraphExtractor.LLM
+    extractor: Sorana.Graph.GraphExtractor.LLM
   ]
 
-# The LLM is automatically injected from the :arcana, :llm config
+# The LLM is automatically injected from the :sorana, :llm config
 ```
 
 Or use programmatically:
 
 ```elixir
-alias Arcana.Graph.GraphBuilder
+alias Sorana.Graph.GraphBuilder
 
 # Build graph with combined extractor
 {:ok, graph_data} = GraphBuilder.build(chunks,
-  extractor: {Arcana.Graph.GraphExtractor.LLM, llm: my_llm}
+  extractor: {Sorana.Graph.GraphExtractor.LLM, llm: my_llm}
 )
 
 # Returns:
@@ -289,13 +289,13 @@ alias Arcana.Graph.GraphBuilder
 
 ### Separate Extractors (Fallback)
 
-If `extractor` is not set, Arcana falls back to separate entity and relationship extractors:
+If `extractor` is not set, Sorana falls back to separate entity and relationship extractors:
 
 ```elixir
 # Build graph with separate extractors
 {:ok, graph_data} = GraphBuilder.build(chunks,
-  entity_extractor: {Arcana.Graph.EntityExtractor.NER, []},
-  relationship_extractor: {Arcana.Graph.RelationshipExtractor.LLM, llm: my_llm}
+  entity_extractor: {Sorana.Graph.EntityExtractor.NER, []},
+  relationship_extractor: {Sorana.Graph.RelationshipExtractor.LLM, llm: my_llm}
 )
 ```
 
@@ -305,8 +305,8 @@ The default NER extractor uses Bumblebee for local entity recognition:
 
 ```elixir
 # Default NER extractor
-extractor = {Arcana.Graph.EntityExtractor.NER, []}
-{:ok, entities} = Arcana.Graph.EntityExtractor.extract(extractor, text)
+extractor = {Sorana.Graph.EntityExtractor.NER, []}
+{:ok, entities} = Sorana.Graph.EntityExtractor.extract(extractor, text)
 
 # Returns entities like:
 # [
@@ -321,8 +321,8 @@ The LLM extractor uses an LLM to identify semantic relationships:
 
 ```elixir
 # LLM-based relationship extraction
-extractor = {Arcana.Graph.RelationshipExtractor.LLM, llm: &MyApp.llm/3}
-{:ok, relationships} = Arcana.Graph.RelationshipExtractor.extract(extractor, text, entities)
+extractor = {Sorana.Graph.RelationshipExtractor.LLM, llm: &MyApp.llm/3}
+{:ok, relationships} = Sorana.Graph.RelationshipExtractor.extract(extractor, text, entities)
 
 # Returns relationships like:
 # [
@@ -336,8 +336,8 @@ The Leiden algorithm detects clusters of related entities:
 
 ```elixir
 # Leiden community detection
-detector = {Arcana.Graph.CommunityDetector.Leiden, resolution: 1.0}
-{:ok, communities} = Arcana.Graph.CommunityDetector.detect(detector, entities, relationships)
+detector = {Sorana.Graph.CommunityDetector.Leiden, resolution: 1.0}
+{:ok, communities} = Sorana.Graph.CommunityDetector.detect(detector, entities, relationships)
 
 # Returns communities with hierarchy:
 # [
@@ -379,10 +379,10 @@ Combine vector and graph search with Reciprocal Rank Fusion:
 
 ```elixir
 # Run vector search
-{:ok, vector_results} = Arcana.search(query, repo: MyApp.Repo)
+{:ok, vector_results} = Sorana.search(query, repo: MyApp.Repo)
 
 # Extract entities from query
-{:ok, entities} = Arcana.Graph.EntityExtractor.NER.extract(query, [])
+{:ok, entities} = Sorana.Graph.EntityExtractor.NER.extract(query, [])
 
 # Combine with graph search
 results = Graph.fusion_search(graph, entities, vector_results,
@@ -412,7 +412,7 @@ All components support custom implementations via behaviours.
 
 ```elixir
 defmodule MyApp.CustomGraphExtractor do
-  @behaviour Arcana.Graph.GraphExtractor
+  @behaviour Sorana.Graph.GraphExtractor
 
   @impl true
   def extract(text, opts) do
@@ -424,7 +424,7 @@ defmodule MyApp.CustomGraphExtractor do
 end
 
 # Configure globally
-config :arcana, :graph,
+config :sorana, :graph,
   extractor: MyApp.CustomGraphExtractor
 ```
 
@@ -432,7 +432,7 @@ config :arcana, :graph,
 
 ```elixir
 defmodule MyApp.SpacyExtractor do
-  @behaviour Arcana.Graph.EntityExtractor
+  @behaviour Sorana.Graph.EntityExtractor
 
   @impl true
   def extract(text, opts) do
@@ -443,7 +443,7 @@ defmodule MyApp.SpacyExtractor do
 end
 
 # Configure globally
-config :arcana, :graph,
+config :sorana, :graph,
   entity_extractor: {MyApp.SpacyExtractor, endpoint: "http://localhost:5000"}
 ```
 
@@ -451,7 +451,7 @@ config :arcana, :graph,
 
 ```elixir
 defmodule MyApp.PatternExtractor do
-  @behaviour Arcana.Graph.RelationshipExtractor
+  @behaviour Sorana.Graph.RelationshipExtractor
 
   @impl true
   def extract(text, entities, opts) do
@@ -462,7 +462,7 @@ defmodule MyApp.PatternExtractor do
 end
 
 # Configure globally
-config :arcana, :graph,
+config :sorana, :graph,
   relationship_extractor: {MyApp.PatternExtractor, patterns: [...]}
 ```
 
@@ -470,7 +470,7 @@ config :arcana, :graph,
 
 ```elixir
 defmodule MyApp.LouvainDetector do
-  @behaviour Arcana.Graph.CommunityDetector
+  @behaviour Sorana.Graph.CommunityDetector
 
   @impl true
   def detect(entities, relationships, opts) do
@@ -481,7 +481,7 @@ defmodule MyApp.LouvainDetector do
 end
 
 # Configure globally
-config :arcana, :graph,
+config :sorana, :graph,
   community_detector: {MyApp.LouvainDetector, resolution: 0.5}
 ```
 
@@ -489,7 +489,7 @@ config :arcana, :graph,
 
 ```elixir
 defmodule MyApp.ExtractiveSum do
-  @behaviour Arcana.Graph.CommunitySummarizer
+  @behaviour Sorana.Graph.CommunitySummarizer
 
   @impl true
   def summarize(entities, relationships, opts) do
@@ -500,11 +500,11 @@ defmodule MyApp.ExtractiveSum do
 end
 
 # Configure globally
-config :arcana, :graph,
+config :sorana, :graph,
   community_summarizer: {MyApp.ExtractiveSum, max_sentences: 3}
 
 # Or disable summarization entirely
-config :arcana, :graph,
+config :sorana, :graph,
   community_summarizer: nil
 ```
 
@@ -551,33 +551,33 @@ GraphRAG emits telemetry events for observability.
 
 ### Graph Building Events
 
-- `[:arcana, :graph, :build, :start | :stop | :exception]` - Full graph build
-- `[:arcana, :graph, :ner, :start | :stop | :exception]` - Named entity recognition
-- `[:arcana, :graph, :relationship_extraction, :start | :stop | :exception]` - Relationship extraction
-- `[:arcana, :graph, :community_detection, :start | :stop | :exception]` - Community detection
-- `[:arcana, :graph, :community_summary, :start | :stop | :exception]` - Community summarization
+- `[:sorana, :graph, :build, :start | :stop | :exception]` - Full graph build
+- `[:sorana, :graph, :ner, :start | :stop | :exception]` - Named entity recognition
+- `[:sorana, :graph, :relationship_extraction, :start | :stop | :exception]` - Relationship extraction
+- `[:sorana, :graph, :community_detection, :start | :stop | :exception]` - Community detection
+- `[:sorana, :graph, :community_summary, :start | :stop | :exception]` - Community summarization
 
 ### Graph Search Events
 
-- `[:arcana, :graph, :search, :start | :stop | :exception]` - Graph-enhanced search
+- `[:sorana, :graph, :search, :start | :stop | :exception]` - Graph-enhanced search
 
 ### Graph Store Events
 
 These events are emitted by the storage layer:
 
-- `[:arcana, :graph_store, :persist_entities, :start | :stop | :exception]`
-- `[:arcana, :graph_store, :persist_relationships, :start | :stop | :exception]`
-- `[:arcana, :graph_store, :persist_mentions, :start | :stop | :exception]`
-- `[:arcana, :graph_store, :search, :start | :stop | :exception]`
-- `[:arcana, :graph_store, :delete_by_chunks, :start | :stop | :exception]`
-- `[:arcana, :graph_store, :delete_by_collection, :start | :stop | :exception]`
+- `[:sorana, :graph_store, :persist_entities, :start | :stop | :exception]`
+- `[:sorana, :graph_store, :persist_relationships, :start | :stop | :exception]`
+- `[:sorana, :graph_store, :persist_mentions, :start | :stop | :exception]`
+- `[:sorana, :graph_store, :search, :start | :stop | :exception]`
+- `[:sorana, :graph_store, :delete_by_chunks, :start | :stop | :exception]`
+- `[:sorana, :graph_store, :delete_by_collection, :start | :stop | :exception]`
 
 ### Example Handler
 
 ```elixir
 :telemetry.attach(
   "graph-metrics",
-  [:arcana, :graph, :build, :stop],
+  [:sorana, :graph, :build, :stop],
   fn _event, measurements, metadata, _config ->
     duration_ms = System.convert_time_unit(measurements.duration, :native, :millisecond)
     Logger.info("Built graph: #{metadata.entity_count} entities, #{metadata.relationship_count} relationships in #{duration_ms}ms")
@@ -598,13 +598,13 @@ Re-extract entities and relationships from all chunks:
 
 ```bash
 # Rebuild all collections
-mix arcana.graph.rebuild
+mix sorana.graph.rebuild
 
 # Rebuild specific collection
-mix arcana.graph.rebuild --collection my-docs
+mix sorana.graph.rebuild --collection my-docs
 
 # Resume interrupted rebuild
-mix arcana.graph.rebuild --resume
+mix sorana.graph.rebuild --resume
 ```
 
 Use this when:
@@ -618,16 +618,16 @@ Run Leiden community detection on the graph:
 
 ```bash
 # Detect communities for all collections
-mix arcana.graph.detect_communities
+mix sorana.graph.detect_communities
 
 # Specific collection
-mix arcana.graph.detect_communities --collection my-docs
+mix sorana.graph.detect_communities --collection my-docs
 
 # Custom resolution (higher = smaller communities)
-mix arcana.graph.detect_communities --resolution 1.5
+mix sorana.graph.detect_communities --resolution 1.5
 
 # Multiple hierarchy levels
-mix arcana.graph.detect_communities --max-level 3
+mix sorana.graph.detect_communities --max-level 3
 ```
 
 ### Summarize Communities
@@ -636,32 +636,32 @@ Generate LLM summaries for detected communities:
 
 ```bash
 # Summarize dirty communities (those needing regeneration)
-mix arcana.graph.summarize_communities
+mix sorana.graph.summarize_communities
 
 # Force regenerate all summaries
-mix arcana.graph.summarize_communities --force
+mix sorana.graph.summarize_communities --force
 
 # Specific collection
-mix arcana.graph.summarize_communities --collection my-docs
+mix sorana.graph.summarize_communities --collection my-docs
 
 # Parallel summarization (faster)
-mix arcana.graph.summarize_communities --concurrency 4
+mix sorana.graph.summarize_communities --concurrency 4
 
 # Quiet mode (less output)
-mix arcana.graph.summarize_communities --quiet
+mix sorana.graph.summarize_communities --quiet
 ```
 
 Requires an LLM to be configured. All standard `:llm` config formats are supported:
 
 ```elixir
 # String format (simplest, uses req_llm config for API key)
-config :arcana, :llm, "openai:gpt-4o-mini"
+config :sorana, :llm, "openai:gpt-4o-mini"
 
 # Tuple with options (explicit API key)
-config :arcana, :llm, {"openai:gpt-4o-mini", api_key: "..."}
+config :sorana, :llm, {"openai:gpt-4o-mini", api_key: "..."}
 
 # Function (full control)
-config :arcana, :llm, fn prompt, context, opts ->
+config :sorana, :llm, fn prompt, context, opts ->
   {:ok, MyApp.LLM.complete(prompt)}
 end
 ```
@@ -674,21 +674,21 @@ After ingesting new documents:
 
 ```bash
 # 1. Detect communities in the graph
-mix arcana.graph.detect_communities
+mix sorana.graph.detect_communities
 
 # 2. Generate summaries for communities
-mix arcana.graph.summarize_communities
+mix sorana.graph.summarize_communities
 ```
 
 To refresh everything:
 
 ```bash
 # 1. Rebuild the graph (re-extract entities/relationships)
-mix arcana.graph.rebuild
+mix sorana.graph.rebuild
 
 # 2. Re-detect communities
-mix arcana.graph.detect_communities
+mix sorana.graph.detect_communities
 
 # 3. Regenerate all summaries
-mix arcana.graph.summarize_communities --force
+mix sorana.graph.summarize_communities --force
 ```

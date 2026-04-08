@@ -1,10 +1,10 @@
 # Evaluation
 
-Measure and improve your retrieval quality with Arcana's evaluation system.
+Measure and improve your retrieval quality with Sorana's evaluation system.
 
 ## Overview
 
-Arcana provides tools to evaluate how well your RAG pipeline retrieves relevant information:
+Sorana provides tools to evaluate how well your RAG pipeline retrieves relevant information:
 
 1. **Test Cases** - Questions paired with their known relevant chunks
 2. **Evaluation Runs** - Execute searches and measure performance
@@ -18,11 +18,11 @@ Create test cases when you know which chunks should be retrieved for a question:
 
 ```elixir
 # First, find the chunk you want to use as ground truth
-chunks = Arcana.search("GenServer state", repo: MyApp.Repo, limit: 1)
+chunks = Sorana.search("GenServer state", repo: MyApp.Repo, limit: 1)
 chunk = hd(chunks)
 
 # Create a test case linking question to relevant chunk
-{:ok, test_case} = Arcana.Evaluation.create_test_case(
+{:ok, test_case} = Sorana.Evaluation.create_test_case(
   repo: MyApp.Repo,
   question: "How do you manage state in Elixir?",
   relevant_chunk_ids: [chunk.id]
@@ -34,9 +34,9 @@ chunk = hd(chunks)
 Generate test cases automatically using an LLM:
 
 ```elixir
-{:ok, test_cases} = Arcana.Evaluation.generate_test_cases(
+{:ok, test_cases} = Sorana.Evaluation.generate_test_cases(
   repo: MyApp.Repo,
-  llm: Application.get_env(:arcana, :llm),
+  llm: Application.get_env(:sorana, :llm),
   sample_size: 50
 )
 ```
@@ -48,9 +48,9 @@ The generator samples random chunks and asks the LLM to create questions that sh
 Generate test cases from a specific collection:
 
 ```elixir
-{:ok, test_cases} = Arcana.Evaluation.generate_test_cases(
+{:ok, test_cases} = Sorana.Evaluation.generate_test_cases(
   repo: MyApp.Repo,
-  llm: Application.get_env(:arcana, :llm),
+  llm: Application.get_env(:sorana, :llm),
   sample_size: 50,
   collection: "elixir-docs"
 )
@@ -60,16 +60,16 @@ Generate test cases from a specific collection:
 
 ```bash
 # Generate 50 test cases (default)
-mix arcana.eval.generate
+mix sorana.eval.generate
 
 # Custom sample size
-mix arcana.eval.generate --sample-size 100
+mix sorana.eval.generate --sample-size 100
 
 # From a specific collection
-mix arcana.eval.generate --collection elixir-docs
+mix sorana.eval.generate --collection elixir-docs
 
 # From a specific source
-mix arcana.eval.generate --source-id my-source
+mix sorana.eval.generate --source-id my-source
 ```
 
 ## Running Evaluations
@@ -77,7 +77,7 @@ mix arcana.eval.generate --source-id my-source
 Run an evaluation against all test cases:
 
 ```elixir
-{:ok, run} = Arcana.Evaluation.run(
+{:ok, run} = Sorana.Evaluation.run(
   repo: MyApp.Repo,
   mode: :semantic  # or :fulltext, :hybrid
 )
@@ -88,11 +88,11 @@ Run an evaluation against all test cases:
 For end-to-end RAG evaluation, you can also evaluate the quality of generated answers:
 
 ```elixir
-{:ok, run} = Arcana.Evaluation.run(
+{:ok, run} = Sorana.Evaluation.run(
   repo: MyApp.Repo,
   mode: :semantic,
   evaluate_answers: true,
-  llm: Application.get_env(:arcana, :llm)
+  llm: Application.get_env(:sorana, :llm)
 )
 
 # Includes faithfulness metric
@@ -110,13 +110,13 @@ When `evaluate_answers: true` is set, the evaluation:
 
 ```bash
 # Run with semantic search (default)
-mix arcana.eval.run
+mix sorana.eval.run
 
 # Run with hybrid search
-mix arcana.eval.run --mode hybrid
+mix sorana.eval.run --mode hybrid
 
 # Run with full-text search
-mix arcana.eval.run --mode fulltext
+mix sorana.eval.run --mode fulltext
 ```
 
 ### Understanding Results
@@ -155,10 +155,10 @@ Run evaluations with different settings to find the best configuration:
 
 ```elixir
 # Test semantic search
-{:ok, semantic_run} = Arcana.Evaluation.run(repo: MyApp.Repo, mode: :semantic)
+{:ok, semantic_run} = Sorana.Evaluation.run(repo: MyApp.Repo, mode: :semantic)
 
 # Test hybrid search
-{:ok, hybrid_run} = Arcana.Evaluation.run(repo: MyApp.Repo, mode: :hybrid)
+{:ok, hybrid_run} = Sorana.Evaluation.run(repo: MyApp.Repo, mode: :hybrid)
 
 # Compare
 IO.puts("Semantic MRR: #{semantic_run.metrics.mrr}")
@@ -169,24 +169,24 @@ IO.puts("Hybrid MRR: #{hybrid_run.metrics.mrr}")
 
 ```elixir
 # List all test cases
-test_cases = Arcana.Evaluation.list_test_cases(repo: MyApp.Repo)
+test_cases = Sorana.Evaluation.list_test_cases(repo: MyApp.Repo)
 
 # Get a specific test case
-test_case = Arcana.Evaluation.get_test_case(id, repo: MyApp.Repo)
+test_case = Sorana.Evaluation.get_test_case(id, repo: MyApp.Repo)
 
 # Delete a test case
-{:ok, _} = Arcana.Evaluation.delete_test_case(id, repo: MyApp.Repo)
+{:ok, _} = Sorana.Evaluation.delete_test_case(id, repo: MyApp.Repo)
 
 # List past runs
-runs = Arcana.Evaluation.list_runs(repo: MyApp.Repo, limit: 10)
+runs = Sorana.Evaluation.list_runs(repo: MyApp.Repo, limit: 10)
 
 # Delete a run
-{:ok, _} = Arcana.Evaluation.delete_run(run_id, repo: MyApp.Repo)
+{:ok, _} = Sorana.Evaluation.delete_run(run_id, repo: MyApp.Repo)
 ```
 
 ## Dashboard
 
-The Arcana Dashboard provides a visual interface for evaluation:
+The Sorana Dashboard provides a visual interface for evaluation:
 
 - **Test Cases tab** - View, generate, and delete test cases
 - **Run Evaluation tab** - Execute evaluations with different search modes
